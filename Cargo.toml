@@ -13,6 +13,7 @@ homepage = "https://github.com/dvshapkin/vfs-kit"
 repository = "https://github.com/dvshapkin/vfs-kit"
 
 keywords = ["vfs", "virtual-file-system", "dir-fs", "map-fs"]
+categories = ["filesystem", "development-tools"]
 
 [dependencies]
 anyhow = "1.0"
