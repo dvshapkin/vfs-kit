@@ -1,0 +1,18 @@
+[package]
+name = "vfs-kit"
+version = "0.1.0"
+edition = "2024"
+
+authors = ["dvshapkin <dvshapkin@mail.ru>"]
+description = "Virtual file systems KIT"
+readme = "README.md"
+license = "MIT"
+
+documentation = "https://docs.rs/vfs-kit"
+homepage = "https://github.com/dvshapkin/vfs-kit"
+repository = "https://github.com/dvshapkin/vfs-kit"
+
+keywords = ["vfs", "virtual-file-system", "dir-fs", "map-fs"]
+
+[dependencies]
+anyhow = "1.0"
