@@ -1,13 +1,32 @@
 use std::path::Path;
 
+/// FsBackend defines a common API for all virtual file systems (vfs) in the crate.
+/// Some functions here use `path` as a parameter or return value.
+/// In all cases, `path` will refer to the virtual file system. The exception
+/// is the `root()` function, which returns the path in the host file system.
 pub trait FsBackend {
-    fn root(&mut self, path: &str) -> Result<()>;
-    fn current_path(&self) -> &Path;
-    fn cd(&mut self, path: &str) -> Result<()>;
-    fn mkdir(&mut self, name: &str) -> Result<()>;
+    /// Returns root path refer to the host file system.
+    fn root(&self) -> &Path;
+
+    /// Returns current working directory related to the vfs root.
+    fn cwd(&self) -> &Path;
+
+    /// Changes the current working directory.
+    /// `path` can be in relative or absolute form, but in both cases it must exist in vfs.
+    /// Error returns in case the `path` is not exist.
+    fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
+
+    /// Creates directory and all it parents, if necessary.
+    fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
+    
     fn mkfile(&mut self, name: &str, content: &[u8]) -> Result<()>;
+    
+    /// Returns true, if `path` exists.
+    fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
+    
     fn rm(&mut self, path: &str) -> Result<()>;
+    
     fn clean(&mut self) -> Result<()>;
 }
 
-type Result<T> = std::result::Result<T, anyhow::Error>;
+pub type Result<T> = std::result::Result<T, anyhow::Error>;
