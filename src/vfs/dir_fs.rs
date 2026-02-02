@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
@@ -231,43 +231,35 @@ impl Drop for DirFS {
             return;
         }
 
-        // Собираем все пути для удаления (кроме корня "/")
-        let mut paths_to_remove: Vec<PathBuf> = self
-            .entries
-            .iter()
-            .filter(|&p| p != &PathBuf::from("/"))
-            .cloned()
-            .collect();
-
-        // Сортируем: от самых глубоких к корневым (чтобы удалить вложенные сначала)
-        paths_to_remove.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
-
-        for entry in &paths_to_remove {
-            match entry.strip_prefix("/") {
-                Ok(path) => {
-                    let host = self.root.join(path);
-                    if host.is_dir() {
-                        if let Err(e) = std::fs::remove_dir(&host) {
-                            eprintln!("Failed to remove directory {:?}: {}", host, e);
-                        }
-                    } else {
-                        if let Err(e) = std::fs::remove_file(&host) {
-                            eprintln!("Failed to remove file {:?}: {}", host, e);
-                        }
+        let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
+        for entry in &self.entries {
+            if entry != &PathBuf::from("/") {
+                match entry.strip_prefix("/") {
+                    Ok(path) => {
+                        let host = self.root.join(path);
+                        sorted_paths_to_remove.insert(host);
                     }
-                    self.entries.remove(entry);
+                    Err(e) => eprintln!("{}", e)
                 }
-                Err(e) => eprintln!("{}", e),
+            }
+        }
+        for parent in &self.created_root_parents {
+            sorted_paths_to_remove.insert(parent.clone());
+        }
+
+        for host_path in sorted_paths_to_remove.iter().rev() {
+            if host_path.is_dir() {
+                if let Err(e) = std::fs::remove_dir(&host_path) {
+                    eprintln!("Failed to remove directory {:?}: {}", host_path, e);
+                }
+            } else {
+                if let Err(e) = std::fs::remove_file(&host_path) {
+                    eprintln!("Failed to remove file {:?}: {}", host_path, e);
+                }
             }
         }
 
-        for dir in self.created_root_parents.iter().rev() {
-            if dir.exists() {
-                if let Err(e) = std::fs::remove_dir(dir) {
-                    eprintln!("Failed to remove directory {:?}: {}", dir, e);
-                }
-            }
-        }
+        self.entries.clear();
         self.created_root_parents.clear();
     }
 }
