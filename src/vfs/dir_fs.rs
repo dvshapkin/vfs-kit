@@ -17,8 +17,7 @@ pub struct DirFS {
 impl DirFS {
     /// Creates a new DirFs instance with the root directory at `path`.
     /// `path` is an absolute host path.
-    /// If `path` is not absolute, an attempt is made to convert it
-    /// to absolute form using `std::env::current_dir()`.
+    /// If `path` is not absolute, error returns.
     pub fn new<P: AsRef<Path>>(root: P) -> Result<Self> {
         let root = root.as_ref();
 
@@ -233,15 +232,15 @@ impl Drop for DirFS {
         }
 
         // Собираем все пути для удаления (кроме корня "/")
-        let mut paths_to_remove: Vec<PathBuf> = self.entries.iter()
+        let mut paths_to_remove: Vec<PathBuf> = self
+            .entries
+            .iter()
             .filter(|&p| p != &PathBuf::from("/"))
             .cloned()
             .collect();
 
         // Сортируем: от самых глубоких к корневым (чтобы удалить вложенные сначала)
-        paths_to_remove.sort_by(|a, b| {
-            b.components().count().cmp(&a.components().count())
-        });
+        paths_to_remove.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
 
         for entry in &paths_to_remove {
             match entry.strip_prefix("/") {
@@ -258,7 +257,7 @@ impl Drop for DirFS {
                     }
                     self.entries.remove(entry);
                 }
-                Err(e) => eprintln!("{}", e)
+                Err(e) => eprintln!("{}", e),
             }
         }
 
