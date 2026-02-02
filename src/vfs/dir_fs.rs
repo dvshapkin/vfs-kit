@@ -9,8 +9,8 @@ use crate::core::{FsBackend, Result};
 pub struct DirFS {
     root: PathBuf,                      // host-related absolute normalized path
     cwd: PathBuf,                       // inner absolute normalized path
-    entries: HashSet<PathBuf>,          // inner absolute path form
-    created_root_parents: Vec<PathBuf>, // host-related paths
+    entries: HashSet<PathBuf>,          // inner absolute normalized paths
+    created_root_parents: Vec<PathBuf>, // host-related absolute normalized paths
     is_auto_clean: bool,
 }
 
@@ -691,6 +691,7 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+
                 let temp_dir = setup_test_env();
                 fs::set_permissions(&temp_dir, PermissionsExt::from_mode(0o444)).unwrap(); // readonly
 
@@ -994,12 +995,13 @@ mod tests {
                 let temp_dir = setup_test_env();
                 let root = temp_dir.path();
                 let protected = root.join("protected");
-                let protected_root = protected.join("root");
-                std::fs::create_dir_all(&protected_root).unwrap();
+                std::fs::create_dir(&protected).unwrap();
                 std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap(); // No access
 
                 let mut fs = DirFS::new(root).unwrap();
-                let result = fs.mkfile("/protected/root/file.txt", None);
+                let result = fs.mkfile("/protected/file.txt", None);
+
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o755)).unwrap(); // Grant access
 
                 assert!(result.is_err());
                 assert!(
