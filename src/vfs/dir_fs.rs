@@ -75,7 +75,7 @@ impl DirFS {
     /// If auto-clean flag is true all created in vfs artifacts
     /// will be removed on drop.
     pub fn set_auto_clean(&mut self, clean: bool) {
-        todo!()
+        self.is_auto_clean = clean;
     }
 
     fn host_path<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
