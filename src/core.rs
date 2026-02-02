@@ -16,13 +16,13 @@ pub trait FsBackend {
     /// Error returns in case the `path` is not exist.
     fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
 
+    /// Returns true, if `path` exists.
+    fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
+
     /// Creates directory and all it parents, if necessary.
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
     
     fn mkfile(&mut self, name: &str, content: &[u8]) -> Result<()>;
-    
-    /// Returns true, if `path` exists.
-    fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
     
     fn rm(&mut self, path: &str) -> Result<()>;
     
