@@ -22,7 +22,7 @@ pub trait FsBackend {
     /// Creates directory and all it parents, if necessary.
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
     
-    fn mkfile(&mut self, name: &str, content: &[u8]) -> Result<()>;
+    fn mkfile<P: AsRef<Path>>(&mut self, name: P, content: Option<&[u8]>) -> Result<()>;
     
     fn rm(&mut self, path: &str) -> Result<()>;
     

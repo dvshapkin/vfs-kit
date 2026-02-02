@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::anyhow;
@@ -6,9 +7,9 @@ use anyhow::anyhow;
 use crate::core::{FsBackend, Result};
 
 pub struct DirFS {
-    root: PathBuf,             // host-related absolute normalized path
-    cwd: PathBuf,              // inner absolute normalized path
-    entries: HashSet<PathBuf>, // inner absolute path form
+    root: PathBuf,                      // host-related absolute normalized path
+    cwd: PathBuf,                       // inner absolute normalized path
+    entries: HashSet<PathBuf>,          // inner absolute path form
     created_root_parents: Vec<PathBuf>, // host-related paths
     is_auto_clean: bool,
 }
@@ -45,7 +46,7 @@ impl DirFS {
             cwd: PathBuf::from("/"),
             entries: HashSet::from([PathBuf::from("/")]),
             created_root_parents,
-            is_auto_clean: true
+            is_auto_clean: true,
         })
     }
 
@@ -100,7 +101,8 @@ impl DirFS {
         }
 
         // Теперь создаём от ближайшего существующего родителя до целевого пути
-        let need_to_create: Vec<_> = host_path.strip_prefix(&existed_part)?
+        let need_to_create: Vec<_> = host_path
+            .strip_prefix(&existed_part)?
             .components()
             .collect();
 
@@ -177,7 +179,8 @@ impl FsBackend for DirFS {
         }
 
         // Теперь создаём от ближайшего существующего родителя до целевого пути
-        let need_to_create: Vec<_> = inner_path.strip_prefix(&existed_parent)?
+        let need_to_create: Vec<_> = inner_path
+            .strip_prefix(&existed_parent)?
             .components()
             .collect();
 
@@ -194,8 +197,24 @@ impl FsBackend for DirFS {
         Ok(())
     }
 
-    fn mkfile(&mut self, name: &str, content: &[u8]) -> Result<()> {
-        todo!()
+    /// Creates new file in vfs.
+    /// `file_path` must be inner vfs path. It must contain the name of the file,
+    /// optionally preceded by existing parent directory.
+    /// If the parent directory does not exist, an error is returned.
+    fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
+        let file_path = Self::normalize(self.cwd.join(file_path));
+        if let Some(parent) = file_path.parent() {
+            if !self.exists(parent) {
+                return Err(anyhow!("{:?} does not exist", parent));
+            }
+        }
+        let host = self.root.join(file_path.strip_prefix("/")?);
+        let mut fd = std::fs::File::create(host)?;
+        self.entries.insert(file_path);
+        if let Some(content) = content {
+            fd.write_all(content)?;
+        }
+        Ok(())
     }
 
     fn rm(&mut self, path: &str) -> Result<()> {
@@ -213,9 +232,39 @@ impl Drop for DirFS {
             return;
         }
 
+        // Собираем все пути для удаления (кроме корня "/")
+        let mut paths_to_remove: Vec<PathBuf> = self.entries.iter()
+            .filter(|&p| p != &PathBuf::from("/"))
+            .cloned()
+            .collect();
+
+        // Сортируем: от самых глубоких к корневым (чтобы удалить вложенные сначала)
+        paths_to_remove.sort_by(|a, b| {
+            b.components().count().cmp(&a.components().count())
+        });
+
+        for entry in &paths_to_remove {
+            match entry.strip_prefix("/") {
+                Ok(path) => {
+                    let host = self.root.join(path);
+                    if host.is_dir() {
+                        if let Err(e) = std::fs::remove_dir(&host) {
+                            eprintln!("Failed to remove directory {:?}: {}", host, e);
+                        }
+                    } else {
+                        if let Err(e) = std::fs::remove_file(&host) {
+                            eprintln!("Failed to remove file {:?}: {}", host, e);
+                        }
+                    }
+                    self.entries.remove(entry);
+                }
+                Err(e) => eprintln!("{}", e)
+            }
+        }
+
         for dir in self.created_root_parents.iter().rev() {
             if dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(dir) {
+                if let Err(e) = std::fs::remove_dir(dir) {
                     eprintln!("Failed to remove directory {:?}: {}", dir, e);
                 }
             }
@@ -254,8 +303,8 @@ mod tests {
             let fs = DirFS::new(&nonexistent).unwrap();
 
             assert_eq!(fs.root, nonexistent.canonicalize().unwrap());
-            assert!(!fs.created_root_parents.is_empty());  // Должны быть созданные родители
-            assert!(nonexistent.exists());  // Каталог создан
+            assert!(!fs.created_root_parents.is_empty()); // Должны быть созданные родители
+            assert!(nonexistent.exists()); // Каталог создан
         }
 
         #[test]
@@ -266,7 +315,7 @@ mod tests {
             let fs = DirFS::new(&nested).unwrap();
 
             assert_eq!(fs.root, nested.canonicalize().unwrap());
-            assert_eq!(fs.created_root_parents.len(), 3);  // a, a/b, a/b/c
+            assert_eq!(fs.created_root_parents.len(), 3); // a, a/b, a/b/c
             assert!(nested.exists());
         }
 
@@ -281,12 +330,12 @@ mod tests {
                 let protected = temp_dir.path().join("protected");
                 let protected_root = protected.join("root");
                 std::fs::create_dir_all(&protected_root).unwrap();
-                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap();  // No access
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap(); // No access
 
                 let result = DirFS::new(&protected_root);
                 assert!(result.is_err());
 
-                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o755)).unwrap();  // Grant access
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o755)).unwrap(); // Grant access
             }
         }
 
@@ -310,7 +359,7 @@ mod tests {
             std::fs::write(&file_path, "content").unwrap();
 
             let result = DirFS::new(&file_path);
-            assert!(result.is_err());  // Нельзя создать DirFs на файле
+            assert!(result.is_err()); // Нельзя создать DirFs на файле
         }
 
         #[test]
@@ -334,7 +383,7 @@ mod tests {
         fn test_new_is_auto_clean_default() {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path()).unwrap();
-            assert!(fs.is_auto_clean);  // По умолчанию true
+            assert!(fs.is_auto_clean); // По умолчанию true
         }
 
         #[test]
@@ -515,12 +564,12 @@ mod tests {
         #[test]
         fn test_mkdir_all_existing_parent() {
             let temp_dir = setup_test_env();
-            fs::create_dir_all(temp_dir.path().join("a")).unwrap();  // Уже существует
+            fs::create_dir_all(temp_dir.path().join("a")).unwrap(); // Уже существует
 
             let target = temp_dir.path().join("a/b/c");
             let created = DirFS::mkdir_all(&target).unwrap();
 
-            assert_eq!(created.len(), 2);  // Только b и c
+            assert_eq!(created.len(), 2); // Только b и c
             assert!(created.contains(&temp_dir.path().join("a/b")));
             assert!(created.contains(&temp_dir.path().join("a/b/c")));
         }
@@ -533,7 +582,7 @@ mod tests {
             let target = temp_dir.path().join("x/y");
             let created = DirFS::mkdir_all(&target).unwrap();
 
-            assert!(created.is_empty());  // Ничего не создавали
+            assert!(created.is_empty()); // Ничего не создавали
         }
 
         #[test]
@@ -575,7 +624,7 @@ mod tests {
             let target = temp_dir.path().join("deep/a/b/c/d");
             let created = DirFS::mkdir_all(&target).unwrap();
 
-            assert_eq!(created.len(), 3);  // b, c, d
+            assert_eq!(created.len(), 3); // b, c, d
         }
 
         #[test]
@@ -592,12 +641,12 @@ mod tests {
         fn test_mkdir_all_file_in_path() {
             let temp_dir = setup_test_env();
             let file_path = temp_dir.path().join("file.txt");
-            fs::write(&file_path, "content").unwrap();  // Создаём файл
+            fs::write(&file_path, "content").unwrap(); // Создаём файл
 
-            let target = file_path.join("subdir");  // Пытаемся создать внутри файла
+            let target = file_path.join("subdir"); // Пытаемся создать внутри файла
 
             let result = DirFS::mkdir_all(&target);
-            assert!(result.is_err());  // Должно быть ошибкой
+            assert!(result.is_err()); // Должно быть ошибкой
         }
 
         #[test]
@@ -630,7 +679,7 @@ mod tests {
             {
                 use std::os::unix::fs::PermissionsExt;
                 let temp_dir = setup_test_env();
-                fs::set_permissions(&temp_dir, PermissionsExt::from_mode(0o444)).unwrap();  // readonly
+                fs::set_permissions(&temp_dir, PermissionsExt::from_mode(0o444)).unwrap(); // readonly
 
                 let target = temp_dir.path().join("protected/dir");
                 let result = DirFS::mkdir_all(&target);
@@ -642,10 +691,6 @@ mod tests {
 
     mod drop {
         use super::*;
-
-        fn setup_test_env() -> TempDir {
-            TempDir::new("dirfs_test").unwrap()
-        }
 
         #[test]
         fn test_drop_removes_created_directories() {
@@ -669,16 +714,16 @@ mod tests {
             let parent = temp_dir.path().join("parent");
             let child = parent.join("child");
 
-            std::fs::create_dir_all(&parent).unwrap();  // Родитель уже существует
+            std::fs::create_dir_all(&parent).unwrap(); // Родитель уже существует
             let fs = DirFS::new(&child).unwrap();
 
-            assert!(parent.exists());  // Родитель должен остаться
+            assert!(parent.exists()); // Родитель должен остаться
             assert!(child.exists());
 
             drop(fs);
 
-            assert!(parent.exists());      // Родитель не удалён
-            assert!(!child.exists());     // Ребёнок удалён
+            assert!(parent.exists()); // Родитель не удалён
+            assert!(!child.exists()); // Ребёнок удалён
         }
 
         #[test]
@@ -687,11 +732,11 @@ mod tests {
             let root = temp_dir.path().join("keep");
 
             let mut fs = DirFS::new(&root).unwrap();
-            fs.is_auto_clean = false;  // Отключаем автоочистку
+            fs.is_auto_clean = false; // Отключаем автоочистку
 
             drop(fs);
 
-            assert!(root.exists());  // Каталог должен остаться
+            assert!(root.exists()); // Каталог должен остаться
         }
 
         #[test]
@@ -700,11 +745,11 @@ mod tests {
             let existing = temp_dir.path().join("existing");
             std::fs::create_dir(&existing).unwrap();
 
-            let fs = DirFS::new(&existing).unwrap();  // Уже существует → created_root_parents пуст
+            let fs = DirFS::new(&existing).unwrap(); // Уже существует → created_root_parents пуст
 
             drop(fs);
 
-            assert!(existing.exists());  // Должен остаться (мы его не создавали)
+            assert!(existing.exists()); // Должен остаться (мы его не создавали)
         }
 
         #[test]
@@ -721,6 +766,83 @@ mod tests {
             assert!(!temp_dir.path().join("a").exists());
             assert!(!temp_dir.path().join("a/b").exists());
             assert!(!nested.exists());
+        }
+
+        //-----------------------------
+
+        #[test]
+        fn test_drop_removes_entries_created_by_mkdir() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path().join("test_root");
+
+            let mut fs = DirFS::new(&root).unwrap();
+            fs.mkdir("/subdir").unwrap();
+            assert!(root.join("subdir").exists());
+
+            drop(fs);
+
+            assert!(!root.exists()); // Корень удалён
+            assert!(!root.join("subdir").exists()); // Подкаталог тоже удалён
+        }
+
+        #[test]
+        fn test_drop_removes_entries_created_by_mkfile() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path().join("test_root");
+
+            let mut fs = DirFS::new(&root).unwrap();
+            fs.mkfile("/file.txt", None).unwrap();
+            assert!(root.join("file.txt").exists());
+
+            drop(fs);
+
+            assert!(!root.exists());
+            assert!(!root.join("file.txt").exists());
+        }
+
+        #[test]
+        fn test_drop_handles_nested_entries() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path().join("test_root");
+
+            let mut fs = DirFS::new(&root).unwrap();
+            fs.mkdir("/a/b/c").unwrap();
+            fs.mkfile("/a/file.txt", None).unwrap();
+
+            assert!(root.join("a/b/c").exists());
+            assert!(root.join("a/file.txt").exists());
+
+            drop(fs);
+
+            assert!(!root.exists());
+        }
+
+        #[test]
+        fn test_drop_ignores_non_entries() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path().join("test_root");
+            let external = temp_dir.path().join("external_file.txt");
+
+            std::fs::write(&external, "content").unwrap(); // Файл вне VFS
+
+            let fs = DirFS::new(&root).unwrap();
+            drop(fs);
+
+            assert!(!root.exists());
+            assert!(external.exists()); // Внешний файл остался
+        }
+
+        #[test]
+        fn test_drop_with_empty_entries() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path().join("empty_root");
+
+            let fs = DirFS::new(&root).unwrap();
+            // entries содержит только "/" (корень)
+
+            drop(fs);
+
+            assert!(!root.exists());
         }
     }
 
