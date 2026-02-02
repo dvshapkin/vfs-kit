@@ -203,8 +203,8 @@ impl FsBackend for DirFS {
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
         let file_path = Self::normalize(self.cwd.join(file_path));
         if let Some(parent) = file_path.parent() {
-            if !self.exists(parent) {
-                return Err(anyhow!("{:?} does not exist", parent));
+            if let Err(e) = std::fs::exists(parent) {
+                return Err(anyhow!("{:?}: {}", parent, e));
             }
         }
         let host = self.root.join(file_path.strip_prefix("/")?);
@@ -834,6 +834,180 @@ mod tests {
             drop(fs);
 
             assert!(!root.exists());
+        }
+    }
+
+    mod mkfile {
+        use super::*;
+
+        #[test]
+        fn test_mkfile_simple_creation() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkfile("/file.txt", None).unwrap();
+
+            assert!(fs.exists("/file.txt"));
+            assert!(root.join("file.txt").exists());
+            assert_eq!(fs.entries.contains(&PathBuf::from("/file.txt")), true);
+        }
+
+        #[test]
+        fn test_mkfile_with_content() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            let content = b"Hello, VFS!";
+            fs.mkfile("/data.bin", Some(content)).unwrap();
+
+            assert!(fs.exists("/data.bin"));
+            let file_content = std::fs::read(root.join("data.bin")).unwrap();
+            assert_eq!(&file_content, content);
+        }
+
+        #[test]
+        fn test_mkfile_in_subdirectory() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkdir("/subdir").unwrap();
+            fs.mkfile("/subdir/file.txt", None).unwrap();
+
+            assert!(fs.exists("/subdir/file.txt"));
+            assert!(root.join("subdir/file.txt").exists());
+        }
+
+        #[test]
+        fn test_mkfile_parent_does_not_exist() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+
+            let result = fs.mkfile("/nonexistent/file.txt", None);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_mkfile_file_already_exists() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkfile("/existing.txt", None).unwrap();
+
+            // Повторная попытка создать тот же файл
+            let result = fs.mkfile("/existing.txt", None);
+            assert!(result.is_ok());  // Должно перезаписать (File::create обрезает файл)
+            assert!(fs.exists("/existing.txt"));
+        }
+
+        #[test]
+        fn test_mkfile_empty_content() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkfile("/empty.txt", Some(&[])).unwrap();  // Пустой массив
+
+
+            assert!(fs.exists("/empty.txt"));
+            let file_size = std::fs::metadata(root.join("empty.txt")).unwrap().len();
+            assert_eq!(file_size, 0);
+        }
+
+        #[test]
+        fn test_mkfile_relative_path() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkdir("/sub").unwrap();
+            fs.cd("/sub").unwrap();  // Меняем текущий каталог
+
+            fs.mkfile("relative.txt", None).unwrap();  // Относительный путь
+
+            assert!(fs.exists("/sub/relative.txt"));
+            assert!(root.join("sub/relative.txt").exists());
+        }
+
+        #[test]
+        fn test_mkfile_normalize_path() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkdir("/normalized").unwrap();
+
+            fs.mkfile("/./normalized/../normalized/file.txt", None).unwrap();
+
+            assert!(fs.exists("/normalized/file.txt"));
+            assert!(root.join("normalized/file.txt").exists());
+        }
+
+        #[test]
+        fn test_mkfile_invalid_path_components() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+
+            // Попытка создать файл с некорректным именем (зависит от ФС)
+            #[cfg(unix)]
+            {
+                let result = fs.mkfile("/invalid\0name.txt", None);
+                assert!(result.is_err());  // NUL в имени файла запрещён в Unix
+            }
+        }
+
+        #[test]
+        fn test_mkfile_permission_denied() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                let temp_dir = setup_test_env();
+                let root = temp_dir.path();
+                let protected = root.join("protected");
+                let protected_root = protected.join("root");
+                std::fs::create_dir_all(&protected_root).unwrap();
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap();  // No access
+
+                let mut fs = DirFS::new(root).unwrap();
+                let result = fs.mkfile("/protected/root/file.txt", None);
+
+                assert!(result.is_err());
+                assert!(result.unwrap_err().to_string().contains("Permission denied"));
+            }
+        }
+
+        #[test]
+        fn test_mkfile_root_directory() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+
+            // Нельзя создать файл с именем "/" (это каталог)
+            let result = fs.mkfile("/", None);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_mkfile_unicode_filename() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.mkfile("/тест.txt", Some(b"Content")).unwrap();
+
+            assert!(fs.exists("/тест.txt"));
+            assert!(root.join("тест.txt").exists());
+            let content = std::fs::read_to_string(root.join("тест.txt")).unwrap();
+            assert_eq!(content, "Content");
         }
     }
 
