@@ -118,6 +118,16 @@ impl DirFS {
 
         Ok(created)
     }
+
+    fn rm_host_artifact<P: AsRef<Path>>(&self, host_path: P) -> Result<()> {
+        let host_path = host_path.as_ref();
+        if host_path.is_dir() {
+            std::fs::remove_dir(host_path)?
+        } else {
+            std::fs::remove_file(host_path)?
+        }
+        Ok(())
+    }
 }
 
 impl FsBackend for DirFS {
@@ -220,8 +230,39 @@ impl FsBackend for DirFS {
         todo!()
     }
 
-    fn cleanup(&mut self) -> Result<()> {
-        todo!()
+    /// Removes all artifacts (dirs and files) in vfs,
+    /// but preserve its root.
+    fn cleanup(&mut self) -> bool {
+        let mut is_ok = true;
+
+        // Собираем все пути для удаления (кроме корня "/")
+        let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
+        for entry in &self.entries {
+            if entry != &PathBuf::from("/") {
+                sorted_paths_to_remove.insert(entry.clone());
+            }
+        }
+
+        for entry in sorted_paths_to_remove.iter().rev() {
+            match entry.strip_prefix("/") {
+                Ok(path) => {
+                    let host = self.root.join(path);
+                    let result = self.rm_host_artifact(&host);
+                    if result.is_ok() {
+                        self.entries.remove(entry);
+                    } else {
+                        is_ok = false;
+                        eprintln!("Unable to remove: {}", host.display());
+                    }
+                }
+                Err(e) => {
+                    is_ok = false;
+                    eprintln!("{:?}: {}", entry, e)
+                },
+            }
+        }
+
+        is_ok
     }
 }
 
@@ -231,35 +272,16 @@ impl Drop for DirFS {
             return;
         }
 
-        let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
-        for entry in &self.entries {
-            if entry != &PathBuf::from("/") {
-                match entry.strip_prefix("/") {
-                    Ok(path) => {
-                        let host = self.root.join(path);
-                        sorted_paths_to_remove.insert(host);
-                    }
-                    Err(e) => eprintln!("{}", e)
-                }
-            }
-        }
-        for parent in &self.created_root_parents {
-            sorted_paths_to_remove.insert(parent.clone());
+        if self.cleanup() {
+            self.entries.clear();
         }
 
-        for host_path in sorted_paths_to_remove.iter().rev() {
-            if host_path.is_dir() {
-                if let Err(e) = std::fs::remove_dir(&host_path) {
-                    eprintln!("Failed to remove directory {:?}: {}", host_path, e);
-                }
-            } else {
-                if let Err(e) = std::fs::remove_file(&host_path) {
-                    eprintln!("Failed to remove file {:?}: {}", host_path, e);
-                }
+        for parent in self.created_root_parents.iter().rev() {
+            if let Err(e) = self.rm_host_artifact(parent) {
+                eprintln!("{}", e);
             }
         }
 
-        self.entries.clear();
         self.created_root_parents.clear();
     }
 }
@@ -901,7 +923,7 @@ mod tests {
 
             // Повторная попытка создать тот же файл
             let result = fs.mkfile("/existing.txt", None);
-            assert!(result.is_ok());  // Должно перезаписать (File::create обрезает файл)
+            assert!(result.is_ok()); // Должно перезаписать (File::create обрезает файл)
             assert!(fs.exists("/existing.txt"));
         }
 
@@ -911,8 +933,7 @@ mod tests {
             let root = temp_dir.path();
 
             let mut fs = DirFS::new(root).unwrap();
-            fs.mkfile("/empty.txt", Some(&[])).unwrap();  // Пустой массив
-
+            fs.mkfile("/empty.txt", Some(&[])).unwrap(); // Пустой массив
 
             assert!(fs.exists("/empty.txt"));
             let file_size = std::fs::metadata(root.join("empty.txt")).unwrap().len();
@@ -926,9 +947,9 @@ mod tests {
 
             let mut fs = DirFS::new(root).unwrap();
             fs.mkdir("/sub").unwrap();
-            fs.cd("/sub").unwrap();  // Меняем текущий каталог
+            fs.cd("/sub").unwrap(); // Меняем текущий каталог
 
-            fs.mkfile("relative.txt", None).unwrap();  // Относительный путь
+            fs.mkfile("relative.txt", None).unwrap(); // Относительный путь
 
             assert!(fs.exists("/sub/relative.txt"));
             assert!(root.join("sub/relative.txt").exists());
@@ -942,7 +963,8 @@ mod tests {
             let mut fs = DirFS::new(root).unwrap();
             fs.mkdir("/normalized").unwrap();
 
-            fs.mkfile("/./normalized/../normalized/file.txt", None).unwrap();
+            fs.mkfile("/./normalized/../normalized/file.txt", None)
+                .unwrap();
 
             assert!(fs.exists("/normalized/file.txt"));
             assert!(root.join("normalized/file.txt").exists());
@@ -959,7 +981,7 @@ mod tests {
             #[cfg(unix)]
             {
                 let result = fs.mkfile("/invalid\0name.txt", None);
-                assert!(result.is_err());  // NUL в имени файла запрещён в Unix
+                assert!(result.is_err()); // NUL в имени файла запрещён в Unix
             }
         }
 
@@ -974,13 +996,18 @@ mod tests {
                 let protected = root.join("protected");
                 let protected_root = protected.join("root");
                 std::fs::create_dir_all(&protected_root).unwrap();
-                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap();  // No access
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap(); // No access
 
                 let mut fs = DirFS::new(root).unwrap();
                 let result = fs.mkfile("/protected/root/file.txt", None);
 
                 assert!(result.is_err());
-                assert!(result.unwrap_err().to_string().contains("Permission denied"));
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Permission denied")
+                );
             }
         }
 
@@ -1008,6 +1035,66 @@ mod tests {
             assert!(root.join("тест.txt").exists());
             let content = std::fs::read_to_string(root.join("тест.txt")).unwrap();
             assert_eq!(content, "Content");
+        }
+    }
+
+    mod cleanup {
+        use super::*;
+
+        #[test]
+        fn test_cleanup_ignores_is_auto_clean() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            fs.is_auto_clean = false;  // Явно отключено
+            fs.mkfile("/temp.txt", None).unwrap();
+
+            fs.cleanup();  // Должен удалить несмотря на is_auto_clean=false
+
+            assert!(!fs.exists("/temp.txt"));
+            assert!(!root.join("temp.txt").exists());
+        }
+
+        #[test]
+        fn test_cleanup_preserves_root_and_parents() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path().join("preserve_root");
+
+            let mut fs = DirFS::new(&root).unwrap();
+            fs.mkdir("/subdir").unwrap();
+            fs.mkfile("/subdir/file.txt", None).unwrap();
+
+            // created_root_parents заполнен при инициализации
+            assert!(!fs.created_root_parents.is_empty());
+
+            fs.cleanup();
+
+            // Корень и его родители остались
+            assert!(root.exists());
+            for parent in &fs.created_root_parents {
+                assert!(parent.exists());
+            }
+
+            // Удалены только записи из entries (кроме "/")
+            assert_eq!(fs.entries.len(), 1);
+            assert!(fs.entries.contains(&PathBuf::from("/")));
+        }
+
+        #[test]
+        fn test_cleanup_empty_entries() {
+            let temp_dir = setup_test_env();
+            let root = temp_dir.path();
+
+            let mut fs = DirFS::new(root).unwrap();
+            // entries содержит только "/"
+            assert_eq!(fs.entries.len(), 1);
+
+            fs.cleanup();
+
+            assert_eq!(fs.entries.len(), 1);  // "/" остался
+            assert!(fs.entries.contains(&PathBuf::from("/")));
+            assert!(root.exists());  // Корень не удалён
         }
     }
 
