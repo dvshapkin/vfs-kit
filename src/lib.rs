@@ -1,5 +1,5 @@
 mod core;
-mod fs;
+mod vfs;
 
 pub use core::{Result, FsBackend};
-pub use fs::DirFs;
+pub use vfs::DirFS;

@@ -26,7 +26,7 @@ pub trait FsBackend {
     
     fn rm(&mut self, path: &str) -> Result<()>;
     
-    fn clean(&mut self) -> Result<()>;
+    fn cleanup(&mut self) -> Result<()>;
 }
 
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
