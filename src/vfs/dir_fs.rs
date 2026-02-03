@@ -384,8 +384,6 @@ mod tests {
             let temp_dir = setup_test_env();
             let special = temp_dir.path().join("папка с пробелами и юникод!");
 
-            println!("Special: {:?}", special);
-
             let fs = DirFS::new(&special).unwrap();
 
             assert_eq!(fs.root, special);
@@ -643,13 +641,13 @@ mod tests {
         #[test]
         fn test_mkdir_all_invalid_path() {
             // Попытка создать в несуществующем месте (без прав)
-            let invalid_path = PathBuf::from("/nonexistent/parent/child");
+            #[cfg(unix)] {
+                let invalid_path = PathBuf::from("/nonexistent/parent/child");
 
-            // Ожидаем ошибку (например, PermissionDenied или NoSuchFile)
-            let result = DirFS::mkdir_all(&invalid_path);
-            println!("{}", result.unwrap_err());
-            // assert!(result.is_err());
-            assert!(false)
+                // Ожидаем ошибку (например, PermissionDenied или NoSuchFile)
+                let result = DirFS::mkdir_all(&invalid_path);
+                assert!(result.is_err());
+            }
         }
 
         #[test]
