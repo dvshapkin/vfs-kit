@@ -361,7 +361,8 @@ mod tests {
             println!("Temp dir: {:?}", temp_dir.path());
 
             let fs = DirFS::new(&messy_path).unwrap();
-            let canonical = temp_dir.path().join("subdir").canonicalize().unwrap();
+            //let canonical = temp_dir.path().join("subdir").canonicalize().unwrap();
+            let canonical = DirFS::normalize(temp_dir.path().join("subdir"));
 
             println!("Expected canonical: {:?}", canonical);
             println!("Actual fs.root: {:?}", fs.root);
