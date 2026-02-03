@@ -16,6 +16,7 @@ pub struct DirFS {
 
 impl DirFS {
     /// Creates a new DirFs instance with the root directory at `path`.
+    /// Checks permissions to create and write into `path`.
     /// `path` is an absolute host path.
     /// If `path` is not absolute, error returns.
     pub fn new<P: AsRef<Path>>(root: P) -> Result<Self> {
@@ -31,13 +32,16 @@ impl DirFS {
             return Err(anyhow!("{:?} is not a directory", root));
         }
 
-        let root = DirFS::normalize(root);
-
-        // TODO: check permissions
+        let root = Self::normalize(root);
 
         let mut created_root_parents = Vec::new();
         if !std::fs::exists(&root)? {
             created_root_parents.extend(Self::mkdir_all(&root)?);
+        }
+
+        // check permissions
+        if !Self::check_permissions(&root) {
+            return Err(anyhow!("Access denied: {:?}", root));
         }
 
         Ok(Self {
@@ -132,6 +136,18 @@ impl DirFS {
             std::fs::remove_file(host_path)?
         }
         Ok(())
+    }
+
+    fn check_permissions<P: AsRef<Path>>(path: P) -> bool {
+        let path = path.as_ref();
+        let filename = path.join(".access");
+        if let Err(_) = std::fs::write(&filename, b"check") {
+            return false;
+        }
+        if let Err(_) = std::fs::remove_file(filename) {
+            return false;
+        }
+        true
     }
 }
 
