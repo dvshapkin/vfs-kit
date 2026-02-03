@@ -78,14 +78,19 @@ impl DirFS {
         self.is_auto_clean = clean;
     }
 
-    fn host_path<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
-        todo!()
+    fn to_host<P: AsRef<Path>>(&self, path: P) -> PathBuf {
+        let path = path.as_ref();
+        self.root.join(path.strip_prefix("/").unwrap_or(path))
+    }
+
+    fn to_inner<P: AsRef<Path>>(&self, path: P) -> PathBuf {
+        Self::normalize(self.cwd.join(path))
     }
 
     /// Make directories recursively.
     /// `path` is an absolute host path.
     /// Returns vector of created directories.
-    pub fn mkdir_all<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>> {
+    fn mkdir_all<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>> {
         let host_path = path.as_ref().to_path_buf();
 
         // Ищем первого существующего родителя
@@ -145,7 +150,7 @@ impl FsBackend for DirFS {
     /// `path` can be in relative or absolute form, but in both cases it must exist.
     /// An error is returned if the specified `path` does not exist.
     fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
-        let target = Self::normalize(self.cwd.join(path));
+        let target = self.to_inner(path);
         if !self.exists(&target) {
             return Err(anyhow!("{} does not exist", target.display()));
         }
@@ -159,7 +164,7 @@ impl FsBackend for DirFS {
     /// - relative (relative to the vfs cwd),
     /// - contain '..' or '.'.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
-        let inner_path = Self::normalize(self.cwd.join(path));
+        let inner_path = self.to_inner(path);
         self.entries.contains(&inner_path)
     }
 
@@ -170,7 +175,7 @@ impl FsBackend for DirFS {
             return Err(anyhow!("invalid path: empty"));
         }
 
-        let inner_path = Self::normalize(self.cwd.join(path));
+        let inner_path = self.to_inner(path);
 
         if self.exists(&inner_path) {
             return Err(anyhow!("path already exists: {}", inner_path.display()));
@@ -197,7 +202,7 @@ impl FsBackend for DirFS {
         for component in need_to_create {
             built.push(component);
             if !self.entries.contains(&built) {
-                let host = self.root.join(built.strip_prefix("/")?);
+                let host = self.to_host(&built);
                 std::fs::create_dir(&host)?;
                 self.entries.insert(built.clone());
             }
@@ -217,7 +222,7 @@ impl FsBackend for DirFS {
                 return Err(anyhow!("{:?}: {}", parent, e));
             }
         }
-        let host = self.root.join(file_path.strip_prefix("/")?);
+        let host = self.to_host(&file_path);
         let mut fd = std::fs::File::create(host)?;
         self.entries.insert(file_path);
         if let Some(content) = content {
@@ -244,21 +249,13 @@ impl FsBackend for DirFS {
         }
 
         for entry in sorted_paths_to_remove.iter().rev() {
-            match entry.strip_prefix("/") {
-                Ok(path) => {
-                    let host = self.root.join(path);
-                    let result = self.rm_host_artifact(&host);
-                    if result.is_ok() {
-                        self.entries.remove(entry);
-                    } else {
-                        is_ok = false;
-                        eprintln!("Unable to remove: {}", host.display());
-                    }
-                }
-                Err(e) => {
-                    is_ok = false;
-                    eprintln!("{:?}: {}", entry, e)
-                },
+            let host = self.to_host(entry);
+            let result = self.rm_host_artifact(&host);
+            if result.is_ok() {
+                self.entries.remove(entry);
+            } else {
+                is_ok = false;
+                eprintln!("Unable to remove: {}", host.display());
             }
         }
 
@@ -641,7 +638,8 @@ mod tests {
         #[test]
         fn test_mkdir_all_invalid_path() {
             // Попытка создать в несуществующем месте (без прав)
-            #[cfg(unix)] {
+            #[cfg(unix)]
+            {
                 let invalid_path = PathBuf::from("/nonexistent/parent/child");
 
                 // Ожидаем ошибку (например, PermissionDenied или NoSuchFile)
@@ -1049,10 +1047,10 @@ mod tests {
             let root = temp_dir.path();
 
             let mut fs = DirFS::new(root).unwrap();
-            fs.is_auto_clean = false;  // Явно отключено
+            fs.is_auto_clean = false; // Явно отключено
             fs.mkfile("/temp.txt", None).unwrap();
 
-            fs.cleanup();  // Должен удалить несмотря на is_auto_clean=false
+            fs.cleanup(); // Должен удалить несмотря на is_auto_clean=false
 
             assert!(!fs.exists("/temp.txt"));
             assert!(!root.join("temp.txt").exists());
@@ -1094,9 +1092,9 @@ mod tests {
 
             fs.cleanup();
 
-            assert_eq!(fs.entries.len(), 1);  // "/" остался
+            assert_eq!(fs.entries.len(), 1); // "/" остался
             assert!(fs.entries.contains(&PathBuf::from("/")));
-            assert!(root.exists());  // Корень не удалён
+            assert!(root.exists()); // Корень не удалён
         }
     }
 
