@@ -1155,12 +1155,15 @@ mod tests {
 
         #[test]
         fn test_rm_nonexistent_path() {
-            let temp_dir = setup_test_env();
-            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+            #[cfg(unix)]
+            {
+                let temp_dir = setup_test_env();
+                let mut fs = DirFS::new(temp_dir.path()).unwrap();
 
-            let result = fs.rm("/not/found");
-            assert!(result.is_err());
-            assert_eq!(result.unwrap_err().to_string(), "/not/found does not exist");
+                let result = fs.rm("/not/found");
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err().to_string(), "/not/found does not exist");
+            }
         }
 
         #[test]
