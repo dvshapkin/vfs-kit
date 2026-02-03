@@ -24,7 +24,7 @@ pub trait FsBackend {
     
     fn mkfile<P: AsRef<Path>>(&mut self, name: P, content: Option<&[u8]>) -> Result<()>;
     
-    fn rm(&mut self, path: &str) -> Result<()>;
+    fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
     
     fn cleanup(&mut self) -> bool;
 }

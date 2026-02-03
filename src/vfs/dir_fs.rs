@@ -247,10 +247,55 @@ impl FsBackend for DirFS {
         Ok(())
     }
 
-    /// Removes vfs artifact (file or directory).
-    /// `path` must be existed.
-    fn rm(&mut self, path: &str) -> Result<()> {
-        todo!()
+    /// Removes a file or directory at the specified path.
+    ///
+    /// - `path`: can be absolute (starting with '/') or relative to the current working
+    /// directory (cwd).
+    /// - If the path is a directory, all its contents are removed recursively.
+    ///
+    /// Returns:
+    /// - `Ok(())` on successful removal.
+    /// - `Err(_)` if:
+    ///   - the path does not exist in the VFS;
+    ///   - there are insufficient permissions;
+    ///   - a filesystem error occurs.
+    fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        if path.as_ref().as_os_str().is_empty() {
+            return Err(anyhow!("invalid path: empty"));
+        }
+        if path.as_ref().as_os_str() == "/" {
+            return Err(anyhow!("invalid path: the root cannot be removed"));
+        }
+
+        let inner_path = self.to_inner(path); // Convert to VFS-internal normalized path
+        let host_path = self.to_host(&inner_path); // Map to real filesystem path
+
+        // Check if the path exists in the virtual filesystem
+        if !self.exists(&inner_path) {
+            return Err(anyhow!("{} does not exist", inner_path.display()));
+        }
+
+        // Remove from the real filesystem
+        if host_path.is_dir() {
+            std::fs::remove_dir_all(&host_path)?; // Recursively remove directory and contents
+        } else {
+            std::fs::remove_file(&host_path)?; // Remove file
+        }
+
+        // Update internal state: collect all entries that start with `inner_path`
+        let removed: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .filter(|p| p.starts_with(&inner_path)) // Match prefix (includes subpaths)
+            .cloned()
+            .collect();
+
+        // Remove all matched entries from the set
+        for p in removed {
+            self.entries.remove(&p);
+        }
+
+        Ok(())
     }
 
     /// Removes all artifacts (dirs and files) in vfs,
@@ -291,7 +336,8 @@ impl Drop for DirFS {
             self.entries.clear();
         }
 
-        let errors: Vec<_> = self.created_root_parents
+        let errors: Vec<_> = self
+            .created_root_parents
             .iter()
             .rev()
             .filter_map(|p| self.rm_host_artifact(p).err())
@@ -1056,6 +1102,215 @@ mod tests {
             assert!(root.join("тест.txt").exists());
             let content = std::fs::read_to_string(root.join("тест.txt")).unwrap();
             assert_eq!(content, "Content");
+        }
+    }
+
+    mod rm {
+        use super::*;
+
+        #[test]
+        fn test_rm_file_success() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            // Create a file in VFS
+            fs.mkfile("/test.txt", Some(b"hello")).unwrap();
+            assert!(fs.exists("/test.txt"));
+            assert!(temp_dir.path().join("test.txt").exists());
+
+            // Remove it
+            fs.rm("/test.txt").unwrap();
+
+            // Verify: VFS and filesystem are updated
+            assert!(!fs.exists("/test.txt"));
+            assert!(!temp_dir.path().join("test.txt").exists());
+        }
+
+        #[test]
+        fn test_rm_directory_recursive() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            // Create nested structure
+            fs.mkdir("/a/b/c").unwrap();
+            fs.mkfile("/a/file1.txt", None).unwrap();
+            fs.mkfile("/a/b/file2.txt", None).unwrap();
+
+            assert!(fs.exists("/a/b/c"));
+            assert!(fs.exists("/a/file1.txt"));
+            assert!(fs.exists("/a/b/file2.txt"));
+
+            // Remove top-level directory
+            fs.rm("/a").unwrap();
+
+            // Verify everything is gone
+            assert!(!fs.exists("/a"));
+            assert!(!fs.exists("/a/b"));
+            assert!(!fs.exists("/a/b/c"));
+            assert!(!fs.exists("/a/file1.txt"));
+            assert!(!fs.exists("/a/b/file2.txt"));
+
+            assert!(!temp_dir.path().join("a").exists());
+        }
+
+        #[test]
+        fn test_rm_nonexistent_path() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            let result = fs.rm("/not/found");
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().to_string(), "/not/found does not exist");
+        }
+
+        #[test]
+        fn test_rm_relative_path() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            fs.mkdir("/parent").unwrap();
+            fs.cd("/parent").unwrap();
+            fs.mkfile("child.txt", None).unwrap();
+
+            assert!(fs.exists("/parent/child.txt"));
+
+            // Remove using relative path
+            fs.rm("child.txt").unwrap();
+
+            assert!(!fs.exists("/parent/child.txt"));
+            assert!(!temp_dir.path().join("parent/child.txt").exists());
+        }
+
+        #[test]
+        fn test_rm_empty_string_path() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            let result = fs.rm("");
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().to_string(), "invalid path: empty");
+        }
+
+        #[test]
+        fn test_rm_root_directory() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            // Attempt to remove root '/'
+            let result = fs.rm("/");
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "invalid path: the root cannot be removed"
+            );
+
+            // Root should still exist
+            assert!(fs.exists("/"));
+            assert!(temp_dir.path().exists());
+        }
+
+        #[test]
+        fn test_rm_trailing_slash() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            fs.mkdir("/dir/").unwrap(); // With trailing slash
+            fs.mkfile("/dir/file.txt", None).unwrap();
+
+            // Remove with trailing slash
+            fs.rm("/dir/").unwrap();
+
+            assert!(!fs.exists("/dir"));
+            assert!(!temp_dir.path().join("dir").exists());
+        }
+
+        #[test]
+        fn test_rm_unicode_path() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            let unicode_path = "/папка/файл.txt";
+            fs.mkdir("/папка").unwrap();
+            fs.mkfile(unicode_path, None).unwrap();
+
+            assert!(fs.exists(unicode_path));
+
+            fs.rm(unicode_path).unwrap();
+
+            assert!(!fs.exists(unicode_path));
+            assert!(!temp_dir.path().join("папка/файл.txt").exists());
+        }
+
+        #[test]
+        fn test_rm_permission_denied() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                let temp_dir = setup_test_env();
+                let mut fs = DirFS::new(temp_dir.path()).unwrap();
+                fs.mkdir("/protected").unwrap();
+
+                // Create a directory and restrict permissions
+                let protected = fs.root().join("protected");
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap();
+
+                // Try to remove via VFS (should fail)
+                let result = fs.rm("/protected");
+                assert!(result.is_err());
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Permission denied")
+                );
+
+                // Clean up: restore permissions
+                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o755)).unwrap();
+            }
+        }
+
+        #[test]
+        fn test_rm_symlink_file() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+
+                let temp_dir = setup_test_env();
+                let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+                // Create real file and symlink
+                std::fs::write(temp_dir.path().join("real.txt"), "content").unwrap();
+                symlink("real.txt", temp_dir.path().join("link.txt")).unwrap();
+
+                fs.mkfile("/link.txt", None).unwrap(); // Add symlink to VFS
+                assert!(fs.exists("/link.txt"));
+
+                // Remove symlink (not the target)
+                fs.rm("/link.txt").unwrap();
+
+                assert!(!fs.exists("/link.txt"));
+                assert!(!temp_dir.path().join("link.txt").exists()); // Symlink gone
+                assert!(temp_dir.path().join("real.txt").exists()); // Target still there
+            }
+        }
+
+        #[test]
+        fn test_rm_after_cd() {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+
+            fs.mkdir("/projects").unwrap();
+            fs.cd("/projects").unwrap();
+            fs.mkfile("notes.txt", None).unwrap();
+
+            assert!(fs.exists("/projects/notes.txt"));
+
+            // Remove from cwd using relative path
+            fs.rm("notes.txt").unwrap();
+
+            assert!(!fs.exists("/projects/notes.txt"));
+            assert!(!temp_dir.path().join("projects/notes.txt").exists());
         }
     }
 
