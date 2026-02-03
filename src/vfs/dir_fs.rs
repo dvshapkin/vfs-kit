@@ -79,8 +79,8 @@ impl DirFS {
     }
 
     fn to_host<P: AsRef<Path>>(&self, path: P) -> PathBuf {
-        let path = path.as_ref();
-        self.root.join(path.strip_prefix("/").unwrap_or(path))
+        let inner = self.to_inner(path);
+        self.root.join(inner.strip_prefix("/").unwrap())
     }
 
     fn to_inner<P: AsRef<Path>>(&self, path: P) -> PathBuf {
