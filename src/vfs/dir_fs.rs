@@ -273,10 +273,13 @@ impl Drop for DirFS {
             self.entries.clear();
         }
 
-        for parent in self.created_root_parents.iter().rev() {
-            if let Err(e) = self.rm_host_artifact(parent) {
-                eprintln!("{}", e);
-            }
+        let errors: Vec<_> = self.created_root_parents
+            .iter()
+            .rev()
+            .filter_map(|p| self.rm_host_artifact(p).err())
+            .collect();
+        if !errors.is_empty() {
+            eprintln!("Failed to remove parents: {:?}", errors);
         }
 
         self.created_root_parents.clear();
