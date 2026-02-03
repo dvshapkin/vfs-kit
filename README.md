@@ -1,5 +1,5 @@
-vfs‑kit — Virtual File System Toolkit
-========================
+Virtual File System Toolkit
+===========================
 
 [![Latest version](https://img.shields.io/crates/v/vfs-kit.svg)](https://crates.io/crates/vfs-kit)
 ![License](https://img.shields.io/crates/l/vfs-kit.svg)
@@ -7,7 +7,7 @@ vfs‑kit — Virtual File System Toolkit
 [![Documentation](https://docs.rs/vfs-kit/badge.svg)](https://docs.rs/vfs-kit)
 
 A lightweight, extensible virtual filesystem (VFS) toolkit for Rust. Provides in‑process abstractions over real 
-or simulated filesystems, ideal for testing, sandboxing, custom storage backends, and educational purposes.
+or simulated filesystems, ideal for testing, sandboxing, custom storage backends, and so on.
 
 ## Overview
 
@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vfs-kit = "0.1.0"
+vfs-kit = "0.1.8"
 ```
 
 Or via `cargo add`:
