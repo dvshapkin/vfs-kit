@@ -21,11 +21,14 @@ pub trait FsBackend {
 
     /// Creates directory and all it parents, if necessary.
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
-    
+
+    /// Creates new file in vfs.
     fn mkfile<P: AsRef<Path>>(&mut self, name: P, content: Option<&[u8]>) -> Result<()>;
-    
+
+    /// Removes a file or directory at the specified path.
     fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
-    
+
+    /// Removes all artifacts (dirs and files) in vfs, but preserve its root.
     fn cleanup(&mut self) -> bool;
 }
 
