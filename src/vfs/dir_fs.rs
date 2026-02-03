@@ -315,7 +315,7 @@ mod tests {
 
             let fs = DirFS::new(&nonexistent).unwrap();
 
-            assert_eq!(fs.root, nonexistent.canonicalize().unwrap());
+            assert_eq!(fs.root, nonexistent);
             assert!(!fs.created_root_parents.is_empty()); // Должны быть созданные родители
             assert!(nonexistent.exists()); // Каталог создан
         }
@@ -327,7 +327,7 @@ mod tests {
 
             let fs = DirFS::new(&nested).unwrap();
 
-            assert_eq!(fs.root, nested.canonicalize().unwrap());
+            assert_eq!(fs.root, nested);
             assert_eq!(fs.created_root_parents.len(), 3); // a, a/b, a/b/c
             assert!(nested.exists());
         }
@@ -357,20 +357,10 @@ mod tests {
             let temp_dir = setup_test_env();
             let messy_path = temp_dir.path().join("././subdir/../subdir");
 
-            println!("Messy path: {:?}", messy_path);
-            println!("Temp dir: {:?}", temp_dir.path());
-
             let fs = DirFS::new(&messy_path).unwrap();
-            //let canonical = temp_dir.path().join("subdir").canonicalize().unwrap();
             let canonical = DirFS::normalize(temp_dir.path().join("subdir"));
 
-            println!("Expected canonical: {:?}", canonical);
-            println!("Actual fs.root: {:?}", fs.root);
-
-            assert_eq!(
-                fs.root,
-                canonical
-            );
+            assert_eq!(fs.root, canonical);
         }
 
         #[test]
@@ -394,9 +384,11 @@ mod tests {
             let temp_dir = setup_test_env();
             let special = temp_dir.path().join("папка с пробелами и юникод!");
 
+            println!("Special: {:?}", special);
+
             let fs = DirFS::new(&special).unwrap();
 
-            assert_eq!(fs.root, special.canonicalize().unwrap());
+            assert_eq!(fs.root, special);
             assert!(special.exists());
         }
 
@@ -655,7 +647,9 @@ mod tests {
 
             // Ожидаем ошибку (например, PermissionDenied или NoSuchFile)
             let result = DirFS::mkdir_all(&invalid_path);
-            assert!(result.is_err());
+            println!("{}", result.unwrap_err());
+            // assert!(result.is_err());
+            assert!(false)
         }
 
         #[test]
