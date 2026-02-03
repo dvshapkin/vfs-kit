@@ -53,9 +53,16 @@ impl DirFS {
         })
     }
 
+    /// Changes auto-clean flag.
+    /// If auto-clean flag is true all created in vfs artifacts
+    /// will be removed on drop.
+    pub fn set_auto_clean(&mut self, clean: bool) {
+        self.is_auto_clean = clean;
+    }
+
     /// Normalizes an arbitrary `path` by processing all occurrences
     /// of '.' and '..' elements. Also, removes final `/`.
-    pub fn normalize<P: AsRef<Path>>(path: P) -> PathBuf {
+    fn normalize<P: AsRef<Path>>(path: P) -> PathBuf {
         let mut result = PathBuf::new();
         for component in path.as_ref().components() {
             match component {
@@ -75,13 +82,6 @@ impl DirFS {
         result
     }
 
-    /// Changes auto-clean flag.
-    /// If auto-clean flag is true all created in vfs artifacts
-    /// will be removed on drop.
-    pub fn set_auto_clean(&mut self, clean: bool) {
-        self.is_auto_clean = clean;
-    }
-
     fn to_host<P: AsRef<Path>>(&self, path: P) -> PathBuf {
         let inner = self.to_inner(path);
         self.root.join(inner.strip_prefix("/").unwrap())
@@ -97,7 +97,7 @@ impl DirFS {
     fn mkdir_all<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>> {
         let host_path = path.as_ref().to_path_buf();
 
-        // Ищем первого существующего родителя
+        // Looking for the first existing parent
         let mut existed_part = host_path.clone();
         while let Some(parent) = existed_part.parent() {
             let parent_buf = parent.to_path_buf();
@@ -108,7 +108,7 @@ impl DirFS {
             existed_part = parent_buf;
         }
 
-        // Теперь создаём от ближайшего существующего родителя до целевого пути
+        // Create from the closest existing parent to the target path
         let need_to_create: Vec<_> = host_path
             .strip_prefix(&existed_part)?
             .components()
@@ -197,7 +197,7 @@ impl FsBackend for DirFS {
             return Err(anyhow!("path already exists: {}", inner_path.display()));
         }
 
-        // Ищем первого существующего родителя
+        // Looking for the first existing parent
         let mut existed_parent = inner_path.clone();
         while let Some(parent) = existed_parent.parent() {
             let parent_buf = parent.to_path_buf();
@@ -208,7 +208,7 @@ impl FsBackend for DirFS {
             existed_parent = parent_buf;
         }
 
-        // Теперь создаём от ближайшего существующего родителя до целевого пути
+        // Create from the closest existing parent to the target path
         let need_to_create: Vec<_> = inner_path
             .strip_prefix(&existed_parent)?
             .components()
@@ -247,6 +247,8 @@ impl FsBackend for DirFS {
         Ok(())
     }
 
+    /// Removes vfs artifact (file or directory).
+    /// `path` must be existed.
     fn rm(&mut self, path: &str) -> Result<()> {
         todo!()
     }
@@ -256,7 +258,7 @@ impl FsBackend for DirFS {
     fn cleanup(&mut self) -> bool {
         let mut is_ok = true;
 
-        // Собираем все пути для удаления (кроме корня "/")
+        // Collect all paths to delete (except the root "/")
         let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
         for entry in &self.entries {
             if entry != &PathBuf::from("/") {
@@ -332,8 +334,8 @@ mod tests {
             let fs = DirFS::new(&nonexistent).unwrap();
 
             assert_eq!(fs.root, nonexistent);
-            assert!(!fs.created_root_parents.is_empty()); // Должны быть созданные родители
-            assert!(nonexistent.exists()); // Каталог создан
+            assert!(!fs.created_root_parents.is_empty()); // parents must be created
+            assert!(nonexistent.exists()); // The catalog has been created
         }
 
         #[test]
@@ -350,7 +352,7 @@ mod tests {
 
         #[test]
         fn test_new_permission_denied() {
-            // Этот тест требует специфической среды (например, readonly FS)
+            // This test requires a specific environment (e.g. readonly FS)
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -386,7 +388,7 @@ mod tests {
             std::fs::write(&file_path, "content").unwrap();
 
             let result = DirFS::new(&file_path);
-            assert!(result.is_err()); // Нельзя создать DirFs на файле
+            assert!(result.is_err()); // Cannot create DirFs on file
         }
 
         #[test]
@@ -410,7 +412,7 @@ mod tests {
         fn test_new_is_auto_clean_default() {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path()).unwrap();
-            assert!(fs.is_auto_clean); // По умолчанию true
+            assert!(fs.is_auto_clean); // True by default
         }
 
         #[test]
@@ -591,7 +593,7 @@ mod tests {
         #[test]
         fn test_mkdir_all_existing_parent() {
             let temp_dir = setup_test_env();
-            fs::create_dir_all(temp_dir.path().join("a")).unwrap(); // Уже существует
+            fs::create_dir_all(temp_dir.path().join("a")).unwrap(); // It already exists
 
             let target = temp_dir.path().join("a/b/c");
             let created = DirFS::mkdir_all(&target).unwrap();
@@ -609,12 +611,12 @@ mod tests {
             let target = temp_dir.path().join("x/y");
             let created = DirFS::mkdir_all(&target).unwrap();
 
-            assert!(created.is_empty()); // Ничего не создавали
+            assert!(created.is_empty()); // Nothing was created
         }
 
         #[test]
         fn test_mkdir_all_root_path() {
-            // Корень ФС (обычно "/")
+            // FS root (usually "/")
             let result = DirFS::mkdir_all("/");
             assert!(result.is_ok());
             assert!(result.unwrap().is_empty());
@@ -636,7 +638,7 @@ mod tests {
         fn test_mkdir_all_absolute_vs_relative() {
             let temp_dir = setup_test_env();
 
-            // Абсолютный путь
+            // The absolute path
             let abs_target = temp_dir.path().join("abs/a/b");
             let abs_created = DirFS::mkdir_all(&abs_target).unwrap();
 
@@ -656,12 +658,12 @@ mod tests {
 
         #[test]
         fn test_mkdir_all_invalid_path() {
-            // Попытка создать в несуществующем месте (без прав)
+            // Attempt to create in a non-existent location (without rights)
             #[cfg(unix)]
             {
                 let invalid_path = PathBuf::from("/nonexistent/parent/child");
 
-                // Ожидаем ошибку (например, PermissionDenied или NoSuchFile)
+                // Expecting an error (e.g. PermissionDenied or NoSuchFile)
                 let result = DirFS::mkdir_all(&invalid_path);
                 assert!(result.is_err());
             }
@@ -671,12 +673,12 @@ mod tests {
         fn test_mkdir_all_file_in_path() {
             let temp_dir = setup_test_env();
             let file_path = temp_dir.path().join("file.txt");
-            fs::write(&file_path, "content").unwrap(); // Создаём файл
+            fs::write(&file_path, "content").unwrap(); // Create a file
 
-            let target = file_path.join("subdir"); // Пытаемся создать внутри файла
+            let target = file_path.join("subdir"); // Trying to create inside the file
 
             let result = DirFS::mkdir_all(&target);
-            assert!(result.is_err()); // Должно быть ошибкой
+            assert!(result.is_err()); // Must be an error
         }
 
         #[test]
@@ -703,8 +705,8 @@ mod tests {
 
         #[test]
         fn test_mkdir_all_permissions_error() {
-            // Этот тест требует специфической среды (например, readonly FS)
-            // Пропускаем в общих тестах, но оставляем для ручного запуска
+            // This test requires a specific environment (e.g. readonly FS).
+            // Skip it in general tests, but leave it for manual launch.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -728,14 +730,14 @@ mod tests {
             let temp_dir = setup_test_env();
             let root = temp_dir.path().join("to_remove");
 
-            // Создаём DirFs, которая создаст новые каталоги
+            // Create DirFs, which will create new directories.
             let fs = DirFS::new(&root).unwrap();
             assert!(root.exists());
 
-            // Уничтожаем fs (должен сработать Drop)
+            // Destroy fs (Drop should work)
             drop(fs);
 
-            // Проверяем, что корень удалён
+            // Check that the root has been removed.
             assert!(!root.exists());
         }
 
@@ -745,16 +747,16 @@ mod tests {
             let parent = temp_dir.path().join("parent");
             let child = parent.join("child");
 
-            std::fs::create_dir_all(&parent).unwrap(); // Родитель уже существует
+            std::fs::create_dir_all(&parent).unwrap(); // The parent already exists
             let fs = DirFS::new(&child).unwrap();
 
-            assert!(parent.exists()); // Родитель должен остаться
+            assert!(parent.exists()); // The parent must remain.
             assert!(child.exists());
 
             drop(fs);
 
-            assert!(parent.exists()); // Родитель не удалён
-            assert!(!child.exists()); // Ребёнок удалён
+            assert!(parent.exists()); // The parent is not deleted
+            assert!(!child.exists()); // The child has been removed
         }
 
         #[test]
@@ -763,11 +765,11 @@ mod tests {
             let root = temp_dir.path().join("keep");
 
             let mut fs = DirFS::new(&root).unwrap();
-            fs.is_auto_clean = false; // Отключаем автоочистку
+            fs.is_auto_clean = false; // Disable auto-cleaning
 
             drop(fs);
 
-            assert!(root.exists()); // Каталог должен остаться
+            assert!(root.exists()); // The catalog must remain
         }
 
         #[test]
@@ -776,11 +778,11 @@ mod tests {
             let existing = temp_dir.path().join("existing");
             std::fs::create_dir(&existing).unwrap();
 
-            let fs = DirFS::new(&existing).unwrap(); // Уже существует → created_root_parents пуст
+            let fs = DirFS::new(&existing).unwrap(); // Already exists → created_root_parents is empty
 
             drop(fs);
 
-            assert!(existing.exists()); // Должен остаться (мы его не создавали)
+            assert!(existing.exists()); // It should remain (we didn't create it)
         }
 
         #[test]
@@ -813,7 +815,7 @@ mod tests {
             drop(fs);
 
             assert!(!root.exists()); // Корень удалён
-            assert!(!root.join("subdir").exists()); // Подкаталог тоже удалён
+            assert!(!root.join("subdir").exists()); // The subdirectory has also been deleted.
         }
 
         #[test]
@@ -854,13 +856,13 @@ mod tests {
             let root = temp_dir.path().join("test_root");
             let external = temp_dir.path().join("external_file.txt");
 
-            std::fs::write(&external, "content").unwrap(); // Файл вне VFS
+            std::fs::write(&external, "content").unwrap(); // File outside VFS
 
             let fs = DirFS::new(&root).unwrap();
             drop(fs);
 
             assert!(!root.exists());
-            assert!(external.exists()); // Внешний файл остался
+            assert!(external.exists()); // The external file remains
         }
 
         #[test]
@@ -869,7 +871,7 @@ mod tests {
             let root = temp_dir.path().join("empty_root");
 
             let fs = DirFS::new(&root).unwrap();
-            // entries содержит только "/" (корень)
+            // entries contains only "/" (root)
 
             drop(fs);
 
@@ -939,9 +941,9 @@ mod tests {
             let mut fs = DirFS::new(root).unwrap();
             fs.mkfile("/existing.txt", None).unwrap();
 
-            // Повторная попытка создать тот же файл
+            // Trying to create the same file again
             let result = fs.mkfile("/existing.txt", None);
-            assert!(result.is_ok()); // Должно перезаписать (File::create обрезает файл)
+            assert!(result.is_ok()); // Should overwrite (File::create truncates the file)
             assert!(fs.exists("/existing.txt"));
         }
 
@@ -951,7 +953,7 @@ mod tests {
             let root = temp_dir.path();
 
             let mut fs = DirFS::new(root).unwrap();
-            fs.mkfile("/empty.txt", Some(&[])).unwrap(); // Пустой массив
+            fs.mkfile("/empty.txt", Some(&[])).unwrap(); // An empty array
 
             assert!(fs.exists("/empty.txt"));
             let file_size = std::fs::metadata(root.join("empty.txt")).unwrap().len();
@@ -965,9 +967,9 @@ mod tests {
 
             let mut fs = DirFS::new(root).unwrap();
             fs.mkdir("/sub").unwrap();
-            fs.cd("/sub").unwrap(); // Меняем текущий каталог
+            fs.cd("/sub").unwrap(); // Changes the current directory
 
-            fs.mkfile("relative.txt", None).unwrap(); // Относительный путь
+            fs.mkfile("relative.txt", None).unwrap(); // A relative path
 
             assert!(fs.exists("/sub/relative.txt"));
             assert!(root.join("sub/relative.txt").exists());
@@ -995,11 +997,11 @@ mod tests {
 
             let mut fs = DirFS::new(root).unwrap();
 
-            // Попытка создать файл с некорректным именем (зависит от ФС)
+            // Attempt to create a file with an invalid name (depending on the file system)
             #[cfg(unix)]
             {
                 let result = fs.mkfile("/invalid\0name.txt", None);
-                assert!(result.is_err()); // NUL в имени файла запрещён в Unix
+                assert!(result.is_err()); // NUL in filenames is prohibited in Unix.
             }
         }
 
@@ -1037,7 +1039,7 @@ mod tests {
 
             let mut fs = DirFS::new(root).unwrap();
 
-            // Нельзя создать файл с именем "/" (это каталог)
+            // Cannot create a file named "/" (it is a directory)
             let result = fs.mkfile("/", None);
             assert!(result.is_err());
         }
@@ -1066,10 +1068,10 @@ mod tests {
             let root = temp_dir.path();
 
             let mut fs = DirFS::new(root).unwrap();
-            fs.is_auto_clean = false; // Явно отключено
+            fs.is_auto_clean = false; // Clearly disabled
             fs.mkfile("/temp.txt", None).unwrap();
 
-            fs.cleanup(); // Должен удалить несмотря на is_auto_clean=false
+            fs.cleanup(); // Must be removed despite is_auto_clean=false
 
             assert!(!fs.exists("/temp.txt"));
             assert!(!root.join("temp.txt").exists());
@@ -1084,18 +1086,18 @@ mod tests {
             fs.mkdir("/subdir").unwrap();
             fs.mkfile("/subdir/file.txt", None).unwrap();
 
-            // created_root_parents заполнен при инициализации
+            // created_root_parents is populated at initialization
             assert!(!fs.created_root_parents.is_empty());
 
             fs.cleanup();
 
-            // Корень и его родители остались
+            // Root and his parents remained
             assert!(root.exists());
             for parent in &fs.created_root_parents {
                 assert!(parent.exists());
             }
 
-            // Удалены только записи из entries (кроме "/")
+            // Only entries (except "/") were removed
             assert_eq!(fs.entries.len(), 1);
             assert!(fs.entries.contains(&PathBuf::from("/")));
         }
@@ -1106,18 +1108,18 @@ mod tests {
             let root = temp_dir.path();
 
             let mut fs = DirFS::new(root).unwrap();
-            // entries содержит только "/"
+            // entries contains only "/"
             assert_eq!(fs.entries.len(), 1);
 
             fs.cleanup();
 
-            assert_eq!(fs.entries.len(), 1); // "/" остался
+            assert_eq!(fs.entries.len(), 1); // "/" remained
             assert!(fs.entries.contains(&PathBuf::from("/")));
-            assert!(root.exists()); // Корень не удалён
+            assert!(root.exists()); // The root is not removed
         }
     }
 
-    // Вспомогательная функция: создаёт временный каталог для тестов
+    // Helper function: Creates a temporary directory for tests
     fn setup_test_env() -> TempDir {
         TempDir::new("dirfs_test").unwrap()
     }
