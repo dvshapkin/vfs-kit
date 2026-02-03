@@ -32,7 +32,42 @@ pub struct DirFS {
     is_auto_clean: bool,
 }
 
+/// A virtual filesystem (VFS) implementation that maps to a real directory on the host system.
+///
+/// `DirFS` provides an isolated, path‑normalized view of a portion of the filesystem, rooted at a
+/// designated absolute path (`root`). It maintains an internal state of valid paths and supports
+/// standard operations:
+/// - Navigate via `cd()` (change working directory).
+/// - Create directories (`mkdir()`) and files (`mkfile()`).
+/// - Remove entries (`rm()`).
+/// - Check existence (`exists()`).
+///
+/// Key features:
+/// - **Path normalization**: Automatically resolves `.`, `..`, and trailing slashes.
+/// - **State consistency**: Tracks all valid VFS paths to ensure operations reflect
+///   the actual VFS structure.
+/// - **Isolated root**: All operations are confined to the `root` directory;
+///   no access to parent paths.
+/// - **Auto‑cleanup**: Optionally removes created parent directories on drop
+///   (when `is_auto_clean = true`).
+/// - **Cross‑platform**: Uses `std::path::Path` for portable path handling.
+///
+/// Usage notes:
+/// - `DirFS` does not follow symlinks; `rm()` removes the link, not the target.
+/// - Permissions are not automatically adjusted; ensure `root` is writable.
+/// - Not thread‑safe in current version (wrap in `Mutex` if needed).
+/// - Errors are returned via `anyhow::Result` with descriptive messages.
+///
+/// Example:
+/// ```
+/// let mut fs = DirFS::new("/tmp/my_vfs").unwrap();
+/// fs.mkdir("/docs").unwrap();
+/// fs.mkfile("/docs/note.txt", Some(b"Hello")).unwrap();
+/// assert!(fs.exists("/docs/note.txt"));
+/// fs.rm("/docs/note.txt").unwrap();
+/// ```
 impl DirFS {
+
     /// Creates a new DirFs instance with the root directory at `path`.
     /// Checks permissions to create and write into `path`.
     /// `path` is an absolute host path.
