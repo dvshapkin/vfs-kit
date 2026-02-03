@@ -357,11 +357,18 @@ mod tests {
             let temp_dir = setup_test_env();
             let messy_path = temp_dir.path().join("././subdir/../subdir");
 
+            println!("Messy path: {:?}", messy_path);
+            println!("Temp dir: {:?}", temp_dir.path());
+
             let fs = DirFS::new(&messy_path).unwrap();
+            let canonical = temp_dir.path().join("subdir").canonicalize().unwrap();
+
+            println!("Expected canonical: {:?}", canonical);
+            println!("Actual fs.root: {:?}", fs.root);
 
             assert_eq!(
                 fs.root,
-                temp_dir.path().join("subdir").canonicalize().unwrap()
+                canonical
             );
         }
 
