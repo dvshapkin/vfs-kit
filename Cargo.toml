@@ -15,6 +15,9 @@ repository = "https://github.com/dvshapkin/vfs-kit"
 keywords = ["vfs", "virtual-file-system", "dir-fs", "map-fs"]
 categories = ["filesystem", "development-tools"]
 
+[lib]
+doctest = false
+
 [dependencies]
 anyhow = "1.0"
 
