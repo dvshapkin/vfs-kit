@@ -181,10 +181,10 @@ impl DirFS {
         Ok(created)
     }
 
-    fn rm_host_artifact<P: AsRef<Path>>(&self, host_path: P) -> Result<()> {
+    fn rm_host_artifact<P: AsRef<Path>>(host_path: P) -> Result<()> {
         let host_path = host_path.as_ref();
         if host_path.is_dir() {
-            std::fs::remove_dir(host_path)?
+            std::fs::remove_dir_all(host_path)?
         } else {
             std::fs::remove_file(host_path)?
         }
@@ -285,7 +285,7 @@ impl FsBackend for DirFS {
     /// optionally preceded by existing parent directory.
     /// If the parent directory does not exist, an error is returned.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
-        let file_path = Self::normalize(self.cwd.join(file_path));
+        let file_path = self.to_inner(file_path);
         if let Some(parent) = file_path.parent() {
             if let Err(e) = std::fs::exists(parent) {
                 return Err(anyhow!("{:?}: {}", parent, e));
@@ -298,6 +298,11 @@ impl FsBackend for DirFS {
             fd.write_all(content)?;
         }
         Ok(())
+    }
+
+    /// Reads contents of the file.
+    fn read(&self, path: &Path) -> Result<Vec<u8>> {
+        todo!()
     }
 
     /// Removes a file or directory at the specified path.
@@ -329,11 +334,7 @@ impl FsBackend for DirFS {
         }
 
         // Remove from the real filesystem
-        if host_path.is_dir() {
-            std::fs::remove_dir_all(&host_path)?; // Recursively remove directory and contents
-        } else {
-            std::fs::remove_file(&host_path)?; // Remove file
-        }
+        Self::rm_host_artifact(host_path)?;
 
         // Update internal state: collect all entries that start with `inner_path`
         let removed: Vec<PathBuf> = self
@@ -365,7 +366,7 @@ impl FsBackend for DirFS {
 
         for entry in sorted_paths_to_remove.iter().rev() {
             let host = self.to_host(entry);
-            let result = self.rm_host_artifact(&host);
+            let result = Self::rm_host_artifact(&host);
             if result.is_ok() {
                 self.entries.remove(entry);
             } else {
@@ -392,7 +393,7 @@ impl Drop for DirFS {
             .created_root_parents
             .iter()
             .rev()
-            .filter_map(|p| self.rm_host_artifact(p).err())
+            .filter_map(|p| Self::rm_host_artifact(p).err())
             .collect();
         if !errors.is_empty() {
             eprintln!("Failed to remove parents: {:?}", errors);

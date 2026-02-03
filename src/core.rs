@@ -24,6 +24,9 @@ pub trait FsBackend {
 
     /// Creates new file in vfs.
     fn mkfile<P: AsRef<Path>>(&mut self, name: P, content: Option<&[u8]>) -> Result<()>;
+    
+    /// Reads contents of the file.
+    fn read(&self, path: &Path) -> Result<Vec<u8>>;
 
     /// Removes a file or directory at the specified path.
     fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
