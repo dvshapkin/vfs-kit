@@ -3,21 +3,17 @@
 /// within a controlled root path while maintaining internal state consistency.
 ///
 /// Key Features:
-///
-///     Isolated root: All operations are confined to a designated root directory (self.root).
-///
-///     Path normalization: Automatically resolves . and .. components and removes trailing slashes.
-///
-///     State tracking: Maintains an internal set of valid paths (self.entries) to reflect VFS
-///     structure.
-///
-///     Auto‑cleanup: Optionally removes created artifacts on Drop (when is_auto_clean = true).
-///
-///     Cross‑platform: Uses std::path::Path and PathBuf for portable path handling.
+/// - **Isolated root**: All operations are confined to a designated root directory (self.root).
+/// - **Path normalization**: Automatically resolves . and .. components and removes trailing slashes.
+/// - **State tracking**: Maintains an internal set of valid paths (self.entries) to reflect VFS
+///   structure.
+/// - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
+/// - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
+
+
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-
 
 use anyhow::anyhow;
 
