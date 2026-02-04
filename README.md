@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vfs-kit = "0.1.10"
+vfs-kit = "0.1.11"
 ```
 
 Or via `cargo add`:
