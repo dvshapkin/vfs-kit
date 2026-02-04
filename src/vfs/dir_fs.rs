@@ -56,6 +56,8 @@ pub struct DirFS {
 ///
 /// Example:
 /// ```
+/// use vfs_kit::{DirFS, FsBackend};
+///
 /// let tmp = std::env::temp_dir();
 /// let root = tmp.join("my_vfs");
 ///
