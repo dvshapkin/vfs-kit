@@ -2,7 +2,7 @@
 //! on the host system. It allows file and directory operations (create, read, remove, navigate)
 //! within a controlled root path while maintaining internal state consistency.
 //!
-//! ## Key Features:
+//! ### Key Features:
 //! - **Isolated root**: All operations are confined to a designated root directory (self.root).
 //! - **Path normalization**: Automatically resolves . and .. components and removes trailing slashes.
 //! - **State tracking**: Maintains an internal set of valid paths (self.entries) to reflect VFS
@@ -10,7 +10,7 @@
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 //!
-//! ## Example:
+//! ### Example:
 //! ```
 //! use vfs_kit::{DirFS, FsBackend};
 //!
@@ -44,7 +44,7 @@ use crate::core::{FsBackend, Result};
 /// - Check existence (`exists()`).
 /// - Read and write content (`read()` / `write()` / `append()`).
 ///
-/// ## Usage notes:
+/// ### Usage notes:
 /// - `DirFS` does not follow symlinks; `rm()` removes the link, not the target.
 /// - Permissions are not automatically adjusted; ensure `root` is writable.
 /// - Not thread‑safe in current version (wrap in `Mutex` if needed).

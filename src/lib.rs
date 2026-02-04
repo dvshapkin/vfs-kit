@@ -1,7 +1,7 @@
 //! A lightweight, extensible virtual filesystem (VFS) toolkit for Rust. Provides in‑process abstractions over real
 //! or simulated filesystems, ideal for testing, sandboxing, custom storage backends, and so on.
 //! 
-//! ## Overview
+//! ### Overview
 //! 
 //! `vfs-kit` lets you work with filesystem-like structures in Rust without touching the real disk (unless you want to).
 //! It defines a common `FsBackend` trait and provides concrete implementations like `DirFS` that map to real directories.
@@ -13,7 +13,7 @@
 //! - **Extensibility**: Plug in new backends by implementing `FsBackend`.
 //! - **Clarity**: Comprehensive error messages and documentation.
 //! 
-//! ## Features
+//! ### Features
 //! 
 //! - Path normalization (`.`, `..`, trailing slashes)
 //! - Current working directory (`cwd`) support
