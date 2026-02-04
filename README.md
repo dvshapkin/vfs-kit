@@ -25,7 +25,7 @@ It defines a common `FsBackend` trait and provides concrete implementations like
 
 - Path normalization (`.`, `..`, trailing slashes)
 - Current working directory (`cwd`) support
-- Create/read/remove files and directories
+- Create/read/write/remove files and directories
 - Existence checks and state tracking
 - Auto‑cleanup on drop (optional)
 - Cross‑platform path handling
@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vfs-kit = "0.1.8"
+vfs-kit = "0.1.9"
 ```
 
 Or via `cargo add`:
@@ -52,7 +52,7 @@ cargo add vfs-kit
 1. Add `vfs-kit` to your `Cargo.toml`.
 2. Choose a backend (`DirFS` for real dirs, plan `MapFS` for memory).
 3. Create an instance with a root path.
-4. Use `mkdir`, `mkfile`, `rm`, `cd`, and `exists` as needed.
+4. Use `mkdir`, `mkfile`, `rm`, `cd`, `read`, `write` and `exists` as needed.
 5. Let the VFS clean up on drop (or disable auto‑cleanup).
 
 ## Usage Example
@@ -94,12 +94,15 @@ fn main() -> anyhow::Result<()> {
   + `exists(path)` — check if path exists
   + `mkdir(path)` — create directory
   + `mkfile(path, content)` — create file with optional content
+  + `read(path)` — read all contents of a file
+  + `write(path, content)` — writes contents to a file
   + `rm(path)` — remove file or directory (recursively)
+  + `cleanup()` — removes all created artifacts (dirs and files)
 
 ### Implementations
 * `DirFS`: Maps to a real directory on disk.
   + All operations are relative to root.
-  + Tracks state in HashSet<PathBuf>.
+  + Tracks state.
   + Supports auto‑cleanup of created parent directories.
   + Normalizes paths automatically.
   + Enforces absolute root path at construction.
@@ -115,7 +118,7 @@ fn main() -> anyhow::Result<()> {
 
 We’re working on these backends:
 * `MapFS`
-  + In‑memory filesystem using HashMap<PathBuf, Vec<u8>>.
+  + In‑memory filesystem using Map.
   + Ideal for testing and transient data.
   + No disk I/O; fully deterministic.
   + Great for mocking file content in tests.
@@ -130,18 +133,14 @@ We’re working on these backends:
 
 * **Additional Backends** (roadmap)
   + ZipFS: Read/write ZIP archives as VFS.
-  + HttpFS: Mount remote HTTP/S3 resources read‑only.
+  + CloudFS: Mount remote HTTP/S3 resources.
   + EncryptedFS: Layered encryption over any backend.
-  + OverlayFS: Union multiple backends with priority.
 
 ## Contributing
 We welcome:
 * Bug reports
 * Feature requests
-* Backend implementations (impl FsBackend for MyFS)
-* Performance optimizations
 * Documentation improvements
-* Examples and tutorials
 
 ## Contact & Links
 * Repository: https://github.com/dvshapkin/vfs-kit

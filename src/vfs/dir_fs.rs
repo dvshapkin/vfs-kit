@@ -14,11 +14,10 @@
 ///     Auto‑cleanup: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 ///
 ///     Cross‑platform: Uses std::path::Path and PathBuf for portable path handling.
-
-
 use std::collections::{BTreeSet, HashSet};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+
 
 use anyhow::anyhow;
 
@@ -41,6 +40,7 @@ pub struct DirFS {
 /// - Create directories (`mkdir()`) and files (`mkfile()`).
 /// - Remove entries (`rm()`).
 /// - Check existence (`exists()`).
+/// - Read and write content (`read()` / `write()`).
 ///
 /// Key features:
 /// - **Path normalization**: Automatically resolves `.`, `..`, and trailing slashes.
@@ -60,17 +60,20 @@ pub struct DirFS {
 ///
 /// Example:
 /// ```
-/// let mut fs = DirFS::new("/tmp/my_vfs").unwrap();
+/// let tmp = std::env::temp_dir();
+/// let root = tmp.join("my_vfs");
+///
+/// let mut fs = DirFS::new(root).unwrap();
 /// fs.mkdir("/docs").unwrap();
 /// fs.mkfile("/docs/note.txt", Some(b"Hello")).unwrap();
 /// assert!(fs.exists("/docs/note.txt"));
+///
 /// fs.rm("/docs/note.txt").unwrap();
 /// ```
 impl DirFS {
-
     /// Creates a new DirFs instance with the root directory at `path`.
     /// Checks permissions to create and write into `path`.
-    /// `path` is an absolute host path.
+    /// * `path` is an absolute host path.
     /// If `path` is not absolute, error returns.
     pub fn new<P: AsRef<Path>>(root: P) -> Result<Self> {
         let root = root.as_ref();
@@ -145,7 +148,7 @@ impl DirFS {
     }
 
     /// Make directories recursively.
-    /// `path` is an absolute host path.
+    /// * `path` is an absolute host path.
     /// Returns vector of created directories.
     fn mkdir_all<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>> {
         let host_path = path.as_ref().to_path_buf();
@@ -216,7 +219,7 @@ impl FsBackend for DirFS {
     }
 
     /// Changes the current working directory.
-    /// `path` can be in relative or absolute form, but in both cases it must exist.
+    /// * `path` can be in relative or absolute form, but in both cases it must exist.
     /// An error is returned if the specified `path` does not exist.
     fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let target = self.to_inner(path);
@@ -238,7 +241,7 @@ impl FsBackend for DirFS {
     }
 
     /// Creates directory and all it parents (if needed).
-    /// `path` - inner vfs path.
+    /// * `path` - inner vfs path.
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         if path.as_ref().as_os_str().is_empty() {
             return Err(anyhow!("invalid path: empty"));
@@ -281,7 +284,7 @@ impl FsBackend for DirFS {
     }
 
     /// Creates new file in vfs.
-    /// `file_path` must be inner vfs path. It must contain the name of the file,
+    /// * `file_path` must be inner vfs path. It must contain the name of the file,
     /// optionally preceded by existing parent directory.
     /// If the parent directory does not exist, an error is returned.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
@@ -300,9 +303,67 @@ impl FsBackend for DirFS {
         Ok(())
     }
 
-    /// Reads contents of the file.
-    fn read(&self, path: &Path) -> Result<Vec<u8>> {
-        todo!()
+    /// Reads the entire contents of a file into a byte vector.
+    /// * `path` is the inner VFS path.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<u8>)` - File content as a byte vector if successful.
+    /// * `Err(anyhow::Error)` - If any of the following occurs:
+    ///   - File does not exist in VFS (`file does not exist: ...`)
+    ///   - Path points to a directory (`... is a directory`)
+    ///   - Permission issues when accessing the host file
+    ///   - I/O errors during reading
+    ///
+    /// # Notes
+    /// - Does **not** follow symbolic links on the host filesystem (reads the link itself).
+    /// - Returns an empty vector for empty files.
+    fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
+        let inner = self.to_inner(&path);
+        if !self.exists(&inner) {
+            return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
+        }
+        let host = self.to_host(&inner);
+        if host.is_dir() {
+            return Err(anyhow!("{} is a directory", host.display()));
+        }
+
+        let mut content = Vec::new();
+        std::fs::File::open(&host)?.read_to_end(&mut content)?;
+
+        Ok(content)
+    }
+
+    /// Writes bytes to an existing file, replacing its entire contents.
+    /// * `path` - Path to the file.
+    /// * `content` - Byte slice (`&[u8]`) to write to the file.
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the write operation succeeded.
+    /// * `Err(anyhow::Error)` - If any of the following occurs:
+    ///   - File does not exist in VFS (`file does not exist: ...`)
+    ///   - Path points to a directory (`... is a directory`)
+    ///   - Permission issues when accessing the host file
+    ///   - I/O errors during writing (e.g., disk full, invalid path)
+    ///
+    /// # Behavior
+    /// - **Overwrites completely**: The entire existing content is replaced.
+    /// - **No file creation**: File must exist (use `mkfile()` first).
+    /// - **Atomic operation**: Uses `std::fs::write()` which replaces the file in one step.
+    /// - **Permissions**: The file retains its original permissions (no chmod is performed).
+    fn write<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
+        let inner = self.to_inner(&path);
+        let host = self.to_host(&inner);
+
+        if !self.exists(&inner) {
+            return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
+        }
+        if host.is_dir() {
+            return Err(anyhow!("{} is a directory", host.display()));
+        }
+
+        std::fs::write(&host, content)?;
+
+        Ok(())
     }
 
     /// Removes a file or directory at the specified path.
@@ -1155,6 +1216,243 @@ mod tests {
             assert!(root.join("тест.txt").exists());
             let content = std::fs::read_to_string(root.join("тест.txt")).unwrap();
             assert_eq!(content, "Content");
+        }
+    }
+
+    mod read {
+        use super::*;
+
+        #[test]
+        fn test_read_existing_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(&temp_dir)?;
+
+            // Create and write a file
+            fs.mkfile("/test.txt", Some(b"Hello, VFS!"))?;
+
+            // Read it back
+            let content = fs.read("/test.txt")?;
+            assert_eq!(content, b"Hello, VFS!");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_nonexistent_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let result = fs.read("/not/found.txt");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("file does not exist: /not/found.txt")
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_directory_as_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/empty_dir")?;
+
+            let result = fs.read("/empty_dir");
+            assert!(result.is_err());
+            // Note: error comes from std::fs::File::open (not a file), not our exists check
+            assert!(result.unwrap_err().to_string().contains("is a directory"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_empty_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/empty.txt", None)?; // Create empty file
+
+            let content = fs.read("/empty.txt")?;
+            assert_eq!(content.len(), 0);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_relative_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.cd("/")?;
+            fs.mkdir("/parent")?;
+            fs.cd("/parent")?;
+            fs.mkfile("child.txt", Some(b"Content"))?;
+
+            // Read using relative path from cwd
+            let content = fs.read("child.txt")?;
+            assert_eq!(content, b"Content");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_unicode_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/папка")?;
+            fs.mkfile("/папка/файл.txt", Some(b"Unicode content"))?;
+
+            let content = fs.read("/папка/файл.txt")?;
+            assert_eq!(content, b"Unicode content");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_permission_denied() -> Result<()> {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                let temp_dir = setup_test_env();
+                let mut fs = DirFS::new(temp_dir.path())?;
+
+                // Create file and restrict permissions
+                fs.mkfile("/protected.txt", Some(b"Secret"))?;
+                let host_path = temp_dir.path().join("protected.txt");
+                std::fs::set_permissions(&host_path, PermissionsExt::from_mode(0o000))?;
+
+                // Try to read (should fail due to permissions)
+                let result = fs.read("/protected.txt");
+                assert!(result.is_err());
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Permission denied")
+                );
+
+                // Clean up: restore permissions
+                std::fs::set_permissions(&host_path, PermissionsExt::from_mode(0o644))?;
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_root_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/root_file.txt", Some(b"At root"))?;
+            let content = fs.read("/root_file.txt")?;
+            assert_eq!(content, b"At root");
+
+            Ok(())
+        }
+    }
+
+    mod write {
+        use super::*;
+
+        #[test]
+        fn test_write_new_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/new.txt", None)?;
+            let content = b"Hello, VFS!";
+            fs.write("/new.txt", content)?;
+
+            // Check file exists and has correct content
+            assert!(fs.exists("/new.txt"));
+            let read_back = fs.read("/new.txt")?;
+            assert_eq!(read_back, content);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_existing_file_overwrite() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/exist.txt", Some(b"Old content"))?;
+
+            let new_content = b"New content";
+            fs.write("/exist.txt", new_content)?;
+
+            let read_back = fs.read("/exist.txt")?;
+            assert_eq!(read_back, new_content);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_to_directory_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/dir")?;
+
+            let result = fs.write("/dir", b"Content");
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("is a directory"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_to_nonexistent_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let result = fs.write("/parent/child.txt", b"Content");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("file does not exist")
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_empty_content() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/empty.txt", None)?;
+            fs.write("/empty.txt", &[])?;
+
+            let read_back = fs.read("/empty.txt")?;
+            assert!(read_back.is_empty());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_relative_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/docs")?;
+            fs.cd("docs")?;
+
+            fs.mkfile("file.txt", None)?;
+            let content = b"Relative write";
+            fs.write("file.txt", content)?;
+
+            let read_back = fs.read("/docs/file.txt")?;
+            assert_eq!(read_back, content);
+
+            Ok(())
         }
     }
 
