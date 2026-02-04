@@ -1,14 +1,29 @@
-/// This module provides a virtual filesystem (VFS) implementation that maps to a real directory
-/// on the host system. It allows file and directory operations (create, read, remove, navigate)
-/// within a controlled root path while maintaining internal state consistency.
-///
-/// Key Features:
-/// - **Isolated root**: All operations are confined to a designated root directory (self.root).
-/// - **Path normalization**: Automatically resolves . and .. components and removes trailing slashes.
-/// - **State tracking**: Maintains an internal set of valid paths (self.entries) to reflect VFS
-///   structure.
-/// - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
-/// - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
+//! This module provides a virtual filesystem (VFS) implementation that maps to a real directory
+//! on the host system. It allows file and directory operations (create, read, remove, navigate)
+//! within a controlled root path while maintaining internal state consistency.
+//!
+//! ## Key Features:
+//! - **Isolated root**: All operations are confined to a designated root directory (self.root).
+//! - **Path normalization**: Automatically resolves . and .. components and removes trailing slashes.
+//! - **State tracking**: Maintains an internal set of valid paths (self.entries) to reflect VFS
+//!   structure.
+//! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
+//! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
+//!
+//! ## Example:
+//! ```
+//! use vfs_kit::{DirFS, FsBackend};
+//!
+//! let tmp = std::env::temp_dir();
+//! let root = tmp.join("my_vfs");
+//!
+//! let mut fs = DirFS::new(root).unwrap();
+//! fs.mkdir("/docs").unwrap();
+//! fs.mkfile("/docs/note.txt", Some(b"Hello")).unwrap();
+//! assert!(fs.exists("/docs/note.txt"));
+//!
+//! fs.rm("/docs/note.txt").unwrap();
+//! ```
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
@@ -17,14 +32,6 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::anyhow;
 
 use crate::core::{FsBackend, Result};
-
-pub struct DirFS {
-    root: PathBuf,                      // host-related absolute normalized path
-    cwd: PathBuf,                       // inner absolute normalized path
-    entries: HashSet<PathBuf>,          // inner absolute normalized paths
-    created_root_parents: Vec<PathBuf>, // host-related absolute normalized paths
-    is_auto_clean: bool,
-}
 
 /// A virtual filesystem (VFS) implementation that maps to a real directory on the host system.
 ///
@@ -37,36 +44,19 @@ pub struct DirFS {
 /// - Check existence (`exists()`).
 /// - Read and write content (`read()` / `write()` / `append()`).
 ///
-/// Key features:
-/// - **Path normalization**: Automatically resolves `.`, `..`, and trailing slashes.
-/// - **State consistency**: Tracks all valid VFS paths to ensure operations reflect
-///   the actual VFS structure.
-/// - **Isolated root**: All operations are confined to the `root` directory;
-///   no access to parent paths.
-/// - **Auto‑cleanup**: Optionally removes created parent directories on drop
-///   (when `is_auto_clean = true`).
-/// - **Cross‑platform**: Uses `std::path::Path` for portable path handling.
-///
-/// Usage notes:
+/// ## Usage notes:
 /// - `DirFS` does not follow symlinks; `rm()` removes the link, not the target.
 /// - Permissions are not automatically adjusted; ensure `root` is writable.
 /// - Not thread‑safe in current version (wrap in `Mutex` if needed).
 /// - Errors are returned via `anyhow::Result` with descriptive messages.
-///
-/// Example:
-/// ```
-/// use vfs_kit::{DirFS, FsBackend};
-///
-/// let tmp = std::env::temp_dir();
-/// let root = tmp.join("my_vfs");
-///
-/// let mut fs = DirFS::new(root).unwrap();
-/// fs.mkdir("/docs").unwrap();
-/// fs.mkfile("/docs/note.txt", Some(b"Hello")).unwrap();
-/// assert!(fs.exists("/docs/note.txt"));
-///
-/// fs.rm("/docs/note.txt").unwrap();
-/// ```
+pub struct DirFS {
+    root: PathBuf,                      // host-related absolute normalized path
+    cwd: PathBuf,                       // inner absolute normalized path
+    entries: HashSet<PathBuf>,          // inner absolute normalized paths
+    created_root_parents: Vec<PathBuf>, // host-related absolute normalized paths
+    is_auto_clean: bool,
+}
+
 impl DirFS {
     /// Creates a new DirFs instance with the root directory at `path`.
     /// Checks permissions to create and write into `path`.
