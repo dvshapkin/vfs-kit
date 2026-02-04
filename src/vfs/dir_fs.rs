@@ -10,7 +10,6 @@
 /// - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 /// - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
-
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -36,7 +35,7 @@ pub struct DirFS {
 /// - Create directories (`mkdir()`) and files (`mkfile()`).
 /// - Remove entries (`rm()`).
 /// - Check existence (`exists()`).
-/// - Read and write content (`read()` / `write()`).
+/// - Read and write content (`read()` / `write()` / `append()`).
 ///
 /// Key features:
 /// - **Path normalization**: Automatically resolves `.`, `..`, and trailing slashes.
@@ -360,6 +359,48 @@ impl FsBackend for DirFS {
         }
 
         std::fs::write(&host, content)?;
+
+        Ok(())
+    }
+
+    /// Appends bytes to the end of an existing file, preserving its old contents.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the existing file.
+    /// * `content` - Byte slice (`&[u8]`) to append to the file.
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the append operation succeeded.
+    /// * `Err(anyhow::Error)` - If any of the following occurs:
+    ///   - File does not exist in VFS (`file does not exist: ...`)
+    ///   - Path points to a directory (`... is a directory`)
+    ///   - Permission issues when accessing the host file
+    ///   - I/O errors during writing (e.g., disk full, invalid path)
+    ///
+    /// # Behavior
+    /// - **Appends only**: Existing content is preserved; new bytes are added at the end.
+    /// - **No parent creation**: Parent directories must exist (use `mkdir()` first if needed).
+    /// - **File creation**: Does NOT create the file if it doesn't exist (returns error).
+    /// - **Permissions**: The file retains its original permissions.
+    fn append<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
+        let inner = self.to_inner(&path);
+        let host = self.to_host(&inner);
+
+        if !self.exists(&inner) {
+            return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
+        }
+        if host.is_dir() {
+            return Err(anyhow!("{} is a directory", host.display()));
+        }
+
+        // Open file in append mode and write content
+        use std::fs::OpenOptions;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&host)?;
+
+        file.write_all(content)?;
 
         Ok(())
     }
@@ -1450,6 +1491,181 @@ mod tests {
             let read_back = fs.read("/docs/file.txt")?;
             assert_eq!(read_back, content);
 
+            Ok(())
+        }
+    }
+
+    mod append {
+        use super::*;
+
+        #[test]
+        fn test_append_to_existing_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create initial file
+            fs.mkfile("/log.txt", Some(b"Initial content\n"))?;
+
+            // Append new content
+            fs.append("/log.txt", b"Appended line 1\n")?;
+            fs.append("/log.txt", b"Appended line 2\n")?;
+
+            // Verify full content
+            let content = fs.read("/log.txt")?;
+            assert_eq!(
+                content,
+                b"Initial content\nAppended line 1\nAppended line 2\n"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_to_empty_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create empty file
+            fs.mkfile("/empty.txt", Some(&[]))?;
+
+            // Append content
+            fs.append("/empty.txt", b"First append\n")?;
+            fs.append("/empty.txt", b"Second append\n")?;
+
+            let content = fs.read("/empty.txt")?;
+            assert_eq!(content, b"First append\nSecond append\n");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_nonexistent_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let result = fs.append("/not_found.txt", b"Content");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("file does not exist: /not_found.txt"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_to_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/mydir")?;
+
+            let result = fs.append("/mydir", b"Content");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("is a directory"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_empty_content() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/test.txt", Some(b"Existing\n"))?;
+
+            // Append empty slice
+            fs.append("/test.txt", &[])?;
+
+            // Content should remain unchanged
+            let content = fs.read("/test.txt")?;
+            assert_eq!(content, b"Existing\n");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_relative_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/docs")?;
+            fs.cd("/docs")?;
+            fs.mkfile("log.txt", Some(b"Start\n"))?; // Relative path
+
+            fs.append("log.txt", b"Added\n")?;
+
+            let content = fs.read("/docs/log.txt")?;
+            assert_eq!(content, b"Start\nAdded\n");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_unicode_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let first = Vec::from("Начало\n");
+            let second = Vec::from("Продолжение\n");
+
+            fs.mkdir("/папка")?;
+            fs.mkfile("/папка/файл.txt", Some(first.as_slice()))?;
+            fs.append("/папка/файл.txt", second.as_slice())?;
+
+            let content = fs.read("/папка/файл.txt")?;
+
+            let mut expected = Vec::from(first);
+            expected.extend(second);
+
+            assert_eq!(content, expected);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_concurrent_append_safety() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/concurrent.txt", Some(b""))?;
+
+            // Simulate multiple appends
+            for i in 1..=3 {
+                fs.append("/concurrent.txt", format!("Line {}\n", i).as_bytes())?;
+            }
+
+            let content = fs.read("/concurrent.txt")?;
+            assert_eq!(content, b"Line 1\nLine 2\nLine 3\n");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_permission_denied() -> Result<()> {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                let temp_dir = setup_test_env();
+                let mut fs = DirFS::new(temp_dir.path())?;
+
+                // Create file and restrict permissions
+                fs.mkfile("/protected.txt", Some(b"Content"))?;
+                let host_path = temp_dir.path().join("protected.txt");
+                std::fs::set_permissions(&host_path, PermissionsExt::from_mode(0o000))?;
+
+                // Try to append (should fail)
+                let result = fs.append("/protected.txt", b"New content");
+                assert!(result.is_err());
+                assert!(result.unwrap_err().to_string().contains("Permission denied"));
+
+                // Clean up: restore permissions
+                std::fs::set_permissions(&host_path, PermissionsExt::from_mode(0o644))?;
+            }
             Ok(())
         }
     }

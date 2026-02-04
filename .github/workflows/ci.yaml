@@ -15,4 +15,4 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
       - name: Run examples
-        run: cargo run --example main
+        run: cargo run --example hello_world

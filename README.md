@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vfs-kit = "0.1.9"
+vfs-kit = "0.1.10"
 ```
 
 Or via `cargo add`:
@@ -52,7 +52,7 @@ cargo add vfs-kit
 1. Add `vfs-kit` to your `Cargo.toml`.
 2. Choose a backend (`DirFS` for real dirs, plan `MapFS` for memory).
 3. Create an instance with a root path.
-4. Use `mkdir`, `mkfile`, `rm`, `cd`, `read`, `write` and `exists` as needed.
+4. Use `mkdir`, `mkfile`, `rm`, `cd`, `read`, `write`, `append` and `exists` as needed.
 5. Let the VFS clean up on drop (or disable auto‑cleanup).
 
 ## Usage Example
@@ -92,11 +92,12 @@ fn main() -> anyhow::Result<()> {
   + `cwd()` — get current working directory
   + `cd(path)` — change directory
   + `exists(path)` — check if path exists
-  + `mkdir(path)` — create directory
-  + `mkfile(path, content)` — create file with optional content
+  + `mkdir(path)` — creates directory
+  + `mkfile(path, content)` — creates file with optional content
   + `read(path)` — read all contents of a file
   + `write(path, content)` — writes contents to a file
-  + `rm(path)` — remove file or directory (recursively)
+  + `append(path, content)` — appends content to the end of the file
+  + `rm(path)` — removes file or directory (recursively)
   + `cleanup()` — removes all created artifacts (dirs and files)
 
 ### Implementations

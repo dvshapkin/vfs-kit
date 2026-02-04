@@ -31,6 +31,9 @@ pub trait FsBackend {
     /// Writes bytes to an existing file, replacing its entire contents.
     fn write<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()>;
 
+    /// Appends bytes to the end of an existing file, preserving its old contents.
+    fn append<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()>;
+
     /// Removes a file or directory at the specified path.
     fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
 

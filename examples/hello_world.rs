@@ -38,6 +38,12 @@ fn main() {
     let second_content = fs.read("/second.txt").unwrap();
     assert_eq!(second_content, b"World");
 
+    println!(
+        "{}, {}!",
+        String::from_utf8(first_content).unwrap(),
+        String::from_utf8(second_content).unwrap()
+    );
+
     // removes both files
     fs.rm("/docs/first.txt").unwrap();
     fs.rm("/second.txt").unwrap();
