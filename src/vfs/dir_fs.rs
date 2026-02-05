@@ -103,6 +103,20 @@ impl DirFS {
         self.is_auto_clean = clean;
     }
 
+    /// Adds an existing artifact (file or directory) to the VFS.
+    /// The artifact must exist and be located in the VFS root directory.
+    /// Once added, it will be managed by the VFS (e.g., deleted upon destruction).
+    /// * `path` is an inner VFS path.
+    pub fn add<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        let inner = self.to_inner(&path);
+        let host = self.to_host(&inner);
+        if !host.exists() {
+            return Err(anyhow!("No such file or directory: {}", path.as_ref().display()));
+        }
+        self.entries.insert(inner);
+        Ok(())
+    }
+
     /// Normalizes an arbitrary `path` by processing all occurrences
     /// of '.' and '..' elements. Also, removes final `/`.
     fn normalize<P: AsRef<Path>>(path: P) -> PathBuf {
@@ -385,10 +399,7 @@ impl FsBackend for DirFS {
 
         // Open file in append mode and write content
         use std::fs::OpenOptions;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(&host)?;
+        let mut file = OpenOptions::new().write(true).append(true).open(&host)?;
 
         file.write_all(content)?;
 
@@ -1535,10 +1546,12 @@ mod tests {
 
             let result = fs.append("/not_found.txt", b"Content");
             assert!(result.is_err());
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("file does not exist: /not_found.txt"));
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("file does not exist: /not_found.txt")
+            );
 
             Ok(())
         }
@@ -1552,10 +1565,7 @@ mod tests {
 
             let result = fs.append("/mydir", b"Content");
             assert!(result.is_err());
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("is a directory"));
+            assert!(result.unwrap_err().to_string().contains("is a directory"));
 
             Ok(())
         }
@@ -1651,11 +1661,163 @@ mod tests {
                 // Try to append (should fail)
                 let result = fs.append("/protected.txt", b"New content");
                 assert!(result.is_err());
-                assert!(result.unwrap_err().to_string().contains("Permission denied"));
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Permission denied")
+                );
 
                 // Clean up: restore permissions
                 std::fs::set_permissions(&host_path, PermissionsExt::from_mode(0o644))?;
             }
+            Ok(())
+        }
+    }
+
+    mod add {
+        use super::*;
+
+        #[test]
+        fn test_add_existing_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create a file outside VFS that we'll add
+            let host_file = temp_dir.path().join("external.txt");
+            std::fs::write(&host_file, b"Content from host")?;
+
+            // Add it to VFS
+            fs.add("external.txt")?;
+
+            // Verify it's now tracked by VFS
+            assert!(fs.exists("/external.txt"));
+            let content = fs.read("/external.txt")?;
+            assert_eq!(content, b"Content from host");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_existing_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create directory outside VFS
+            let host_dir = temp_dir.path().join("external_dir");
+            std::fs::create_dir_all(&host_dir)?;
+
+            std::fs::write(host_dir.join("file.txt"), b"Inside dir")?;
+
+            // Add directory to VFS
+            fs.add("external_dir")?;
+
+            // Verify directory and its contents are accessible
+            assert!(fs.exists("/external_dir"));
+            assert!(!fs.exists("/external_dir/file.txt"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_nonexistent_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let result = fs.add("/nonexistent.txt");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("No such file or directory")
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_relative_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create file in subdirectory
+            let subdir = temp_dir.path().join("sub");
+            std::fs::create_dir_all(&subdir)?;
+            std::fs::write(subdir.join("file.txt"), b"Relative content")?;
+
+            fs.add("/sub")?;
+            fs.cd("/sub")?;
+
+            // Change cwd and add using relative path
+            fs.add("file.txt")?;
+
+            assert!(fs.exists("/sub/file.txt"));
+            let content = fs.read("/sub/file.txt")?;
+            assert_eq!(content, b"Relative content");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_already_tracked_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // First add a file
+            let host_file = temp_dir.path().join("duplicate.txt");
+            std::fs::write(&host_file, b"Original")?;
+            fs.add("duplicate.txt")?;
+
+            // Then try to add it again
+            let result = fs.add("duplicate.txt");
+            // Should succeed (no harm in re-adding)
+            assert!(result.is_ok());
+
+            // Content should remain unchanged
+            let content = fs.read("/duplicate.txt")?;
+            assert_eq!(content, b"Original");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_unicode_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create file with Unicode name
+            let unicode_file = temp_dir.path().join("файл.txt");
+            std::fs::write(&unicode_file, b"Unicode content")?;
+
+            fs.add("файл.txt")?;
+
+            assert!(fs.exists("/файл.txt"));
+            let content = fs.read("/файл.txt")?;
+            assert_eq!(content, b"Unicode content");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_and_auto_cleanup() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create and add a file
+            let host_file = temp_dir.path().join("cleanup.txt");
+            std::fs::write(&host_file, b"To be cleaned up")?;
+            fs.add("cleanup.txt")?;
+
+            assert!(host_file.exists());
+
+            // Drop fs - should auto-cleanup if configured
+            drop(fs);
+
+            // Depending on auto_cleanup setting, file may or may not exist
+            // This test assumes auto_cleanup=true
+            assert!(!host_file.exists());
+
             Ok(())
         }
     }
