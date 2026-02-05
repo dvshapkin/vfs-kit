@@ -9,21 +9,6 @@
 //!   structure.
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
-//!
-//! ### Example:
-//! ```
-//! use vfs_kit::{DirFS, FsBackend};
-//!
-//! let tmp = std::env::temp_dir();
-//! let root = tmp.join("my_vfs");
-//!
-//! let mut fs = DirFS::new(root).unwrap();
-//! fs.mkdir("/docs").unwrap();
-//! fs.mkfile("/docs/note.txt", Some(b"Hello")).unwrap();
-//! assert!(fs.exists("/docs/note.txt"));
-//!
-//! fs.rm("/docs/note.txt").unwrap();
-//! ```
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
@@ -49,6 +34,21 @@ use crate::core::{FsBackend, Result};
 /// - Permissions are not automatically adjusted; ensure `root` is writable.
 /// - Not thread‑safe in current version (wrap in `Mutex` if needed).
 /// - Errors are returned via `anyhow::Result` with descriptive messages.
+///
+/// ### Example:
+/// ```
+/// use vfs_kit::{DirFS, FsBackend};
+///
+/// let tmp = std::env::temp_dir();
+/// let root = tmp.join("my_vfs");
+///
+/// let mut fs = DirFS::new(root).unwrap();
+/// fs.mkdir("/docs").unwrap();
+/// fs.mkfile("/docs/note.txt", Some(b"Hello")).unwrap();
+/// assert!(fs.exists("/docs/note.txt"));
+///
+/// fs.rm("/docs/note.txt").unwrap();
+/// ```
 pub struct DirFS {
     root: PathBuf,                      // host-related absolute normalized path
     cwd: PathBuf,                       // inner absolute normalized path
