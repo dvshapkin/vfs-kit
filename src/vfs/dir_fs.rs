@@ -139,13 +139,13 @@ impl DirFS {
         result
     }
 
-    fn to_host<P: AsRef<Path>>(&self, path: P) -> PathBuf {
-        let inner = self.to_inner(path);
+    fn to_host<P: AsRef<Path>>(&self, inner_path: P) -> PathBuf {
+        let inner = self.to_inner(inner_path);
         self.root.join(inner.strip_prefix("/").unwrap())
     }
 
-    fn to_inner<P: AsRef<Path>>(&self, path: P) -> PathBuf {
-        Self::normalize(self.cwd.join(path))
+    fn to_inner<P: AsRef<Path>>(&self, inner_path: P) -> PathBuf {
+        Self::normalize(self.cwd.join(inner_path))
     }
 
     /// Make directories recursively.
