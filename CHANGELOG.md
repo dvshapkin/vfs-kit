@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.12] - 2026-02-06
 
 ### Added
-- `forget` method for DirFS (excludes an existing file or directory from VFS)
+- `forget()` method for DirFS (excludes an existing file or directory from VFS)
+
+### Changed
+- `add()` if artifact is directory - all its childs will be added recursively.
 
 ## [0.1.11] - 2026-02-05
 
@@ -17,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation improved
 
 ### Added
-- `add` method for DirFS (adds an existing file or directory)
+- `add()` method for DirFS (adds an existing file or directory)
 
 ## [0.1.10] - 2026-02-04
 
@@ -25,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed known bugs
 
 ### Added
-- `read`, `write` and `append` methods for DirFS
+- `read()`, `write()` and `append()` methods for DirFS
 
 ### Changed
 - `FsBackend` trait definition

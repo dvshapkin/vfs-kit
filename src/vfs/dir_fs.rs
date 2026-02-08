@@ -105,15 +105,45 @@ impl DirFS {
 
     /// Adds an existing artifact (file or directory) to the VFS.
     /// The artifact must exist and be located in the VFS root directory.
+    /// If artifact is directory - all its childs will be added recursively.
     /// Once added, it will be managed by the VFS (e.g., deleted upon destruction).
     /// * `path` is an inner VFS path.
     pub fn add<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let inner = self.to_inner(&path);
         let host = self.to_host(&inner);
         if !host.exists() {
-            return Err(anyhow!("No such file or directory: {}", path.as_ref().display()));
+            return Err(anyhow!(
+                "No such file or directory: {}",
+                path.as_ref().display()
+            ));
         }
-        self.entries.insert(inner);
+        self.add_recursive(&inner, &host)
+    }
+
+    pub fn forget<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        let inner = self.to_inner(&path);
+        let host = self.to_host(&inner);
+        if !self.exists(&inner) {
+            return Err(anyhow!("{:?} path is not tracked by VFS", path.as_ref()));
+        }
+        if inner.as_os_str() == "/" {
+            return Err(anyhow!("cannot forget root directory"));
+        }
+
+        self.entries.remove(&inner);
+
+        if host.is_dir() {
+            let childs: Vec<_> = self.entries
+                .iter()
+                .filter(|&entry| entry.starts_with(&inner))
+                .cloned()
+                .collect();
+
+            for child in childs {
+                self.entries.remove(&child);
+            }
+        }
+
         Ok(())
     }
 
@@ -205,6 +235,23 @@ impl DirFS {
             return false;
         }
         true
+    }
+
+    /// Recursively adds a directory and all its entries to the VFS.
+    fn add_recursive(&mut self, inner_path: &Path, host_path: &Path) -> Result<()> {
+        self.entries.insert(inner_path.to_path_buf());
+
+        if host_path.is_dir() {
+            for entry in std::fs::read_dir(host_path)? {
+                let entry = entry?;
+                let host_child = entry.path();
+                let inner_child = inner_path.join(entry.file_name());
+
+                self.add_recursive(&inner_child, &host_child)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1707,14 +1754,11 @@ mod tests {
             let host_dir = temp_dir.path().join("external_dir");
             std::fs::create_dir_all(&host_dir)?;
 
-            std::fs::write(host_dir.join("file.txt"), b"Inside dir")?;
-
             // Add directory to VFS
             fs.add("external_dir")?;
 
             // Verify directory and its contents are accessible
             assert!(fs.exists("/external_dir"));
-            assert!(!fs.exists("/external_dir/file.txt"));
 
             Ok(())
         }
@@ -1817,6 +1861,274 @@ mod tests {
             // Depending on auto_cleanup setting, file may or may not exist
             // This test assumes auto_cleanup=true
             assert!(!host_file.exists());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_single_file_no_recursion() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let host_file = temp_dir.path().join("file.txt");
+            std::fs::write(&host_file, b"Content")?;
+
+            fs.add("file.txt")?;
+
+            assert!(fs.exists("/file.txt"));
+            assert_eq!(fs.read("/file.txt")?, b"Content");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_empty_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let host_dir = temp_dir.path().join("empty_dir");
+            std::fs::create_dir_all(&host_dir)?;
+
+            fs.add("empty_dir")?;
+
+            assert!(fs.exists("/empty_dir"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_directory_with_files() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let data_dir = temp_dir.path().join("data");
+            std::fs::create_dir_all(&data_dir)?;
+            std::fs::write(data_dir.join("file1.txt"), b"First")?;
+            std::fs::write(data_dir.join("file2.txt"), b"Second")?;
+
+            fs.add("data")?;
+
+            assert!(fs.exists("/data"));
+            assert!(fs.exists("/data/file1.txt"));
+            assert!(fs.exists("/data/file2.txt"));
+            assert_eq!(fs.read("/data/file1.txt")?, b"First");
+            assert_eq!(fs.read("/data/file2.txt")?, b"Second");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_add_nested_directories() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let project = temp_dir.path().join("project");
+            std::fs::create_dir_all(project.join("src"))?;
+            std::fs::create_dir_all(project.join("docs"))?;
+
+            std::fs::write(project.join("src").join("main.rs"), b"fn main() {}")?;
+            std::fs::write(project.join("docs").join("README.md"), b"Project docs")?;
+
+            std::fs::write(project.join("config.toml"), b"[config]")?;
+
+            fs.add("project")?;
+
+            assert!(fs.exists("/project"));
+            assert!(fs.exists("/project/src"));
+            assert!(fs.exists("/project/docs"));
+            assert!(fs.exists("/project/src/main.rs"));
+            assert!(fs.exists("/project/docs/README.md"));
+            assert!(fs.exists("/project/config.toml"));
+
+            assert_eq!(fs.read("/project/src/main.rs")?, b"fn main() {}");
+            assert_eq!(fs.read("/project/docs/README.md")?, b"Project docs");
+            assert_eq!(fs.read("/project/config.toml")?, b"[config]");
+
+            Ok(())
+        }
+    }
+
+    mod forget {
+        use super::*;
+
+        #[test]
+        fn test_forget_existing_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/note.txt", Some(b"Hello"))?;
+            assert!(fs.exists("/note.txt"));
+
+            fs.forget("/note.txt")?;
+
+            assert!(!fs.exists("/note.txt"));
+            assert!(std::fs::exists(fs.root().join("note.txt")).unwrap());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_existing_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/temp")?;
+            assert!(fs.exists("/temp"));
+
+            fs.forget("/temp")?;
+
+            assert!(!fs.exists("/temp"));
+            assert!(std::fs::exists(fs.root().join("temp")).unwrap());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_nested_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/a")?;
+            fs.mkdir("/a/b")?;
+            fs.mkfile("/a/b/file.txt", Some(b"Data"))?;
+
+            assert!(fs.exists("/a/b/file.txt"));
+
+            fs.forget("/a/b")?;
+
+            assert!(!fs.exists("/a/b"));
+            assert!(!fs.exists("/a/b/file.txt"));
+            assert!(fs.exists("/a"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_nonexistent_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let result = fs.forget("/not/found.txt");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("path is not tracked by VFS")
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_relative_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/docs")?;
+            fs.cd("/docs")?;
+            fs.mkdir("sub")?;
+            fs.mkfile("sub/file.txt", Some(b"Content"))?;
+
+            assert!(fs.exists("/docs/sub/file.txt"));
+
+            fs.forget("sub/file.txt")?;
+
+            assert!(!fs.exists("/docs/sub/file.txt"));
+            assert!(fs.exists("/docs/sub"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_root_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let result = fs.forget("/");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("cannot forget root directory")
+            );
+
+            assert!(fs.exists("/"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_parent_after_child() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/parent")?;
+            fs.mkfile("/parent/child.txt", Some(b"Child content"))?;
+
+            fs.forget("/parent/child.txt")?;
+            assert!(!fs.exists("/parent/child.txt"));
+
+            fs.forget("/parent")?;
+            assert!(!fs.exists("/parent"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_unicode_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/папка")?;
+            fs.mkfile("/папка/файл.txt", Some(b"Unicode"))?;
+            assert!(fs.exists("/папка/файл.txt"));
+
+            fs.forget("/папка/файл.txt")?;
+
+            assert!(!fs.exists("/папка/файл.txt"));
+            assert!(fs.exists("/папка"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_case_sensitivity_unix() -> Result<()> {
+            #[cfg(unix)]
+            {
+                let temp_dir = setup_test_env();
+                let mut fs = DirFS::new(temp_dir.path())?;
+
+                fs.mkfile("/File.TXT", Some(b"Case test"))?;
+                assert!(fs.exists("/File.TXT"));
+
+                let result = fs.forget("/file.txt");
+                assert!(result.is_err());
+                assert!(fs.exists("/File.TXT"));
+
+                fs.forget("/File.TXT")?;
+                assert!(!fs.exists("/File.TXT"));
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn test_forget_after_add_and_remove() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            let host_file = temp_dir.path().join("external.txt");
+            std::fs::write(&host_file, b"External")?;
+
+            fs.add("external.txt")?;
+            assert!(fs.exists("/external.txt"));
+
+            std::fs::remove_file(&host_file)?;
+            assert!(!host_file.exists());
+
+            fs.forget("external.txt")?;
+            assert!(!fs.exists("/external.txt"));
 
             Ok(())
         }
