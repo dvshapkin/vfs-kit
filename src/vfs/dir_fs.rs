@@ -373,7 +373,7 @@ impl FsBackend for DirFS {
     /// - contain '..' or '.'.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         let inner = self.to_inner(path);
-        self.entries.contains(&inner)
+        self.entries.contains_key(&inner)
     }
 
     /// Returns an iterator over directory entries at a specific depth (shallow listing).
