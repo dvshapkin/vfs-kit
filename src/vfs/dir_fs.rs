@@ -424,11 +424,11 @@ impl FsBackend for DirFS {
         Ok(self
             .entries
             .iter()
-            .map(|entry| entry.as_path())
-            .filter(move |&entry| {
-                entry.starts_with(&inner_path)
-                    && entry != inner_path
-                    && entry.components().count() == component_count
+            .map(|(entry_path, _)| entry_path.as_path())
+            .filter(move |&entry_path| {
+                entry_path.starts_with(&inner_path)
+                    && entry_path != inner_path
+                    && entry_path.components().count() == component_count
             }))
     }
 
