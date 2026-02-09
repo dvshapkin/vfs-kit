@@ -482,8 +482,8 @@ impl FsBackend for DirFS {
         Ok(self
             .entries
             .iter()
-            .map(|entry| entry.as_path())
-            .filter(move |&entry| entry.starts_with(&path) && entry != path))
+            .map(|(entry_path, _)| entry_path.as_path())
+            .filter(move |&entry_path| entry_path.starts_with(&path) && entry_path != path))
     }
 
     /// Creates directory and all it parents (if needed).
