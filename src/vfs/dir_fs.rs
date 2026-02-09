@@ -10,13 +10,14 @@
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::anyhow;
 
 use crate::core::{FsBackend, Result};
+use crate::{DirEntry, DirEntryType};
 
 /// A virtual filesystem (VFS) implementation that maps to a real directory on the host system.
 ///
@@ -50,10 +51,10 @@ use crate::core::{FsBackend, Result};
 /// fs.rm("/docs/note.txt").unwrap();
 /// ```
 pub struct DirFS {
-    root: PathBuf,                      // host-related absolute normalized path
-    cwd: PathBuf,                       // inner absolute normalized path
-    entries: BTreeSet<PathBuf>,         // inner absolute normalized paths
-    created_root_parents: Vec<PathBuf>, // host-related absolute normalized paths
+    root: PathBuf,                        // host-related absolute normalized path
+    cwd: PathBuf,                         // inner absolute normalized path
+    entries: BTreeMap<PathBuf, DirEntry>, // inner absolute normalized paths
+    created_root_parents: Vec<PathBuf>,   // host-related absolute normalized paths
     is_auto_clean: bool,
 }
 
@@ -87,10 +88,17 @@ impl DirFS {
             return Err(anyhow!("Access denied: {:?}", root));
         }
 
+        let inner_root = PathBuf::from("/");
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            inner_root.clone(),
+            DirEntry::new(&inner_root, DirEntryType::Directory),
+        );
+
         Ok(Self {
             root,
-            cwd: PathBuf::from("/"),
-            entries: BTreeSet::from([PathBuf::from("/")]),
+            cwd: inner_root,
+            entries,
             created_root_parents,
             is_auto_clean: true,
         })
@@ -120,28 +128,82 @@ impl DirFS {
         self.add_recursive(&inner, &host)
     }
 
+    /// Removes a file or directory from the VFS and recursively untracks all its contents.
+    ///
+    /// This method "forgets" the specified path — it is permanently removed from the VFS tracking.
+    /// If the path is a directory, all its children (files and subdirectories) are also untracked
+    /// recursively.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to remove from the VFS. Can be a file or a directory.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the path was successfully removed (or was not tracked in the first place).
+    /// * `Err(anyhow::Error)` - If:
+    ///   * The path is not tracked by the VFS.
+    ///   * The path is the root directory (`/`), which cannot be forgotten.
+    ///
+    /// # Behavior
+    ///
+    /// 1. **Existence check**: Returns an error if the resolved path is not currently tracked.
+    /// 2. **Root protection**: Blocks attempts to forget the root directory (`/`).
+    /// 3. **Removal**:
+    ///    * If the path is a file: removes only that file.
+    ///    * If the path is a directory: removes the directory and all its descendants (recursively).
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vfs = DirFS::new("/tmp");
+    /// vfs.mkdir("/docs/backup")?;
+    /// vfs.mkfile("/docs/readme.txt")?;
+    ///
+    /// // Forget the entire /docs directory (and all its contents)
+    /// vfs.forget("/docs")?;
+    ///
+    /// assert!(!vfs.exists("/docs/readme.txt"));
+    /// assert!(!vfs.exists("/docs/backup"));
+    /// ```
+    ///
+    /// ```
+    /// // Error: trying to forget a non-existent path
+    /// assert!(vfs.forget("/nonexistent").is_err());
+    ///
+    /// // Error: trying to forget the root
+    /// assert!(vfs.forget("/").is_err());
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// * The method does **not** interact with the real filesystem — it only affects the VFS's
+    ///   internal tracking.
+    /// * If the path does not exist in the VFS, the method returns an error
+    ///   (unlike `remove` in some systems that may silently succeed).
     pub fn forget<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let inner = self.to_inner(&path);
-        let host = self.to_host(&inner);
         if !self.exists(&inner) {
             return Err(anyhow!("{:?} path is not tracked by VFS", path.as_ref()));
         }
-        if inner.as_os_str() == "/" {
+        if Self::is_inner_root(&inner) {
             return Err(anyhow!("cannot forget root directory"));
         }
 
-        self.entries.remove(&inner);
+        if let Some(entry) = self.entries.remove(&inner) {
+            if entry.is_dir() {
+                let childs: Vec<_> = self
+                    .entries
+                    .iter()
+                    .map(|(path, _)| path)
+                    .filter(|&path| path.starts_with(&inner))
+                    .cloned()
+                    .collect();
 
-        if host.is_dir() {
-            let childs: Vec<_> = self
-                .entries
-                .iter()
-                .filter(|&entry| entry.starts_with(&inner))
-                .cloned()
-                .collect();
-
-            for child in childs {
-                self.entries.remove(&child);
+                for child in childs {
+                    self.entries.remove(&child);
+                }
             }
         }
 
@@ -177,6 +239,12 @@ impl DirFS {
 
     fn to_inner<P: AsRef<Path>>(&self, inner_path: P) -> PathBuf {
         Self::normalize(self.cwd.join(inner_path))
+    }
+
+    fn is_inner_root<P: AsRef<Path>>(path: P) -> bool {
+        let components: Vec<_> = path.as_ref().components().collect();
+        components.len() == 1
+            && components[0] == Component::RootDir
     }
 
     /// Make directories recursively.
