@@ -10,7 +10,7 @@
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -52,7 +52,7 @@ use crate::core::{FsBackend, Result};
 pub struct DirFS {
     root: PathBuf,                      // host-related absolute normalized path
     cwd: PathBuf,                       // inner absolute normalized path
-    entries: HashSet<PathBuf>,          // inner absolute normalized paths
+    entries: BTreeSet<PathBuf>,         // inner absolute normalized paths
     created_root_parents: Vec<PathBuf>, // host-related absolute normalized paths
     is_auto_clean: bool,
 }
@@ -90,7 +90,7 @@ impl DirFS {
         Ok(Self {
             root,
             cwd: PathBuf::from("/"),
-            entries: HashSet::from([PathBuf::from("/")]),
+            entries: BTreeSet::from([PathBuf::from("/")]),
             created_root_parents,
             is_auto_clean: true,
         })
