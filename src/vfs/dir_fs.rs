@@ -308,7 +308,13 @@ impl DirFS {
 
     /// Recursively adds a directory and all its entries to the VFS.
     fn add_recursive(&mut self, inner_path: &Path, host_path: &Path) -> Result<()> {
-        self.entries.insert(inner_path.to_path_buf());
+        let entry_type = if host_path.is_dir() {
+            DirEntryType::Directory
+        } else {
+            DirEntryType::File
+        };
+        let entry = DirEntry::new(inner_path, entry_type);
+        self.entries.insert(inner_path.to_path_buf(), entry);
 
         if host_path.is_dir() {
             for entry in std::fs::read_dir(host_path)? {
