@@ -1,12 +1,12 @@
 use std::path::{Component, Path, PathBuf};
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum DirEntryType {
     File,
     Directory,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DirEntry {
     path: PathBuf,
     kind: DirEntryType,

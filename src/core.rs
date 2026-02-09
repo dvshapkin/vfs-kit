@@ -1,4 +1,5 @@
 use std::path::Path;
+use crate::DirEntry;
 
 /// FsBackend defines a common API for all virtual file systems (vfs) in the crate.
 /// Some functions here use `path` as a parameter or return value.
@@ -21,10 +22,10 @@ pub trait FsBackend {
     
     /// Returns an iterator over directory entries.
     /// `path` is a directory, or CWD if None.
-    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>>;
+    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = DirEntry>>;
 
     /// Returns a recursive iterator over the directory tree starting from a given path.
-    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>>;
+    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = DirEntry>>;
 
     /// Creates directory and all it parents, if necessary.
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;

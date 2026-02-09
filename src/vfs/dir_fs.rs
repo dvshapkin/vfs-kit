@@ -11,7 +11,6 @@
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::FileType;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -388,7 +387,7 @@ impl FsBackend for DirFS {
     ///   - `None`: list contents of the current working directory (`cwd`).
     ///
     /// # Returns
-    /// * `Ok(impl Iterator<Item = &Path>)` - Iterator over paths of immediate children
+    /// * `Ok(impl Iterator<Item = DirEntry>)` - Iterator over entries of immediate children
     ///   (relative to VFS root). The yielded paths are *inside* the target directory
     ///   but do not include deeper nesting.
     /// * `Err(anyhow::Error)` - If the specified path does not exist in VFS.
@@ -397,15 +396,15 @@ impl FsBackend for DirFS {
     /// ```
     /// // List current directory contents
     /// for entry in fs.ls(None)? {
-    ///     println!("{}", entry.display());
+    ///     println!("{:?}", entry);
     /// }
     ///
     /// // List contents of "/docs"
     /// for entry in fs.ls(Some("/docs"))? {
     ///     if entry.is_file() {
-    ///         println!("File: {}", entry.display());
+    ///         println!("File: {:?}", entry);
     ///     } else {
-    ///         println!("Dir:  {}", entry.display());
+    ///         println!("Dir:  {:?}", entry);
     ///     }
     /// }
     /// ```
@@ -418,17 +417,17 @@ impl FsBackend for DirFS {
     /// - **Error handling:** If `path` does not exist, an error is returned before iteration.
     /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
     ///   during iteration.
-    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>> {
+    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = DirEntry>> {
         let inner_path = self.inner_or_cwd(path)?;
         let component_count = inner_path.components().count() + 1;
         Ok(self
             .entries
             .iter()
-            .map(|(entry_path, _)| entry_path.as_path())
-            .filter(move |&entry_path| {
-                entry_path.starts_with(&inner_path)
-                    && entry_path != inner_path
-                    && entry_path.components().count() == component_count
+            .map(|(_, entry)| entry.clone())
+            .filter(move |entry| {
+                entry.path().starts_with(&inner_path)
+                    && entry.path() != inner_path
+                    && entry.path().components().count() == component_count
             }))
     }
 
@@ -443,7 +442,7 @@ impl FsBackend for DirFS {
     ///   - `None`: start from the current working directory (`cwd`).
     ///
     /// # Returns
-    /// * `Ok(impl Iterator<Item = &Path>)` - Iterator over all paths *within* the tree
+    /// * `Ok(impl Iterator<Item = DirEntry>)` - Iterator over all entries *within* the tree
     ///   (relative to VFS root), excluding the root of the traversal.
     /// * `Err(anyhow::Error)` - If:
     ///   - The specified path does not exist in VFS.
@@ -461,13 +460,13 @@ impl FsBackend for DirFS {
     /// ```
     /// // Iterate over current working directory
     /// for entry in fs.tree(None)? {
-    ///     println!("{}", entry.display());
+    ///     println!("{:?}", entry);
     /// }
     ///
     /// // Iterate over a specific directory
     /// for entry in fs.tree(Some("/docs"))? {
     ///     if entry.is_file() {
-    ///         println!("File: {}", entry.display());
+    ///         println!("File: {:?}", entry);
     ///     }
     /// }
     /// ```
@@ -477,13 +476,13 @@ impl FsBackend for DirFS {
     ///   as `self` is alive.
     /// - Symbolic links are treated as regular entries (no follow/resolve).
     /// - Use `Path` methods (e.g., `is_file()`, `is_dir()`) on yielded items for type checks.
-    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>> {
+    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = DirEntry>> {
         let path = self.inner_or_cwd(path)?;
         Ok(self
             .entries
             .iter()
-            .map(|(entry_path, _)| entry_path.as_path())
-            .filter(move |&entry_path| entry_path.starts_with(&path) && entry_path != path))
+            .map(|(_, entry)| entry.clone())
+            .filter(move |entry| entry.path().starts_with(&path) && entry.path() != path))
     }
 
     /// Creates directory and all it parents (if needed).
@@ -545,7 +544,10 @@ impl FsBackend for DirFS {
         }
         let host = self.to_host(&file_path);
         let mut fd = std::fs::File::create(host)?;
-        self.entries.insert(file_path.clone(), DirEntry::new(&file_path, DirEntryType::File));
+        self.entries.insert(
+            file_path.clone(),
+            DirEntry::new(&file_path, DirEntryType::File),
+        );
         if let Some(content) = content {
             fd.write_all(content)?;
         }
@@ -674,7 +676,7 @@ impl FsBackend for DirFS {
         if path.as_ref().as_os_str().is_empty() {
             return Err(anyhow!("invalid path: empty"));
         }
-        if Self::is_inner_root(path) {
+        if Self::is_inner_root(&path) {
             return Err(anyhow!("invalid path: the root cannot be removed"));
         }
 
@@ -774,7 +776,7 @@ mod tests {
 
             assert_eq!(fs.root, root);
             assert_eq!(fs.cwd, PathBuf::from("/"));
-            assert!(fs.entries.contains(&PathBuf::from("/")));
+            assert!(fs.entries.contains_key(&PathBuf::from("/")));
             assert!(fs.created_root_parents.is_empty());
             assert!(fs.is_auto_clean);
         }
@@ -1043,7 +1045,11 @@ mod tests {
 
             let entries: Vec<_> = fs.ls::<&Path>(None)?.collect();
             assert_eq!(entries.len(), 1, "Should return exactly one file");
-            assert_eq!(entries[0], Path::new("/file.txt"), "File path should match");
+            assert_eq!(
+                entries[0].path(),
+                Path::new("/file.txt"),
+                "File path should match"
+            );
 
             Ok(())
         }
@@ -1060,8 +1066,8 @@ mod tests {
             let entries: Vec<_> = fs.ls(Some("/docs"))?.collect();
 
             assert_eq!(entries.len(), 2, "Should list both files in directory");
-            assert!(entries.contains(&Path::new("/docs/readme.txt")));
-            assert!(entries.contains(&Path::new("/docs/todo.txt")));
+            assert!(entries.contains(&DirEntry::new("/docs/readme.txt", DirEntryType::File)));
+            assert!(entries.contains(&DirEntry::new("/docs/todo.txt", DirEntryType::File)));
 
             Ok(())
         }
@@ -1078,11 +1084,11 @@ mod tests {
             let entries: Vec<_> = fs.ls(Some("/project"))?.collect();
 
             assert_eq!(entries.len(), 2, "Only immediate children should be listed");
-            assert!(entries.contains(&Path::new("/project/main.rs")));
+            assert!(entries.contains(&DirEntry::new("/project/main.rs", DirEntryType::File)));
             assert!(
                 !entries
                     .iter()
-                    .any(|&p| p == Path::new("/project/src/lib.rs")),
+                    .any(|p| p == &DirEntry::new("/project/src/lib.rs", DirEntryType::File)),
                 "Nested file should not be included"
             );
 
@@ -1106,12 +1112,12 @@ mod tests {
                 2,
                 "Both file and subdirectory should be listed"
             );
-            assert!(entries.contains(&Path::new("/mix/file1.txt")));
-            assert!(entries.contains(&Path::new("/mix/subdir")));
+            assert!(entries.contains(&DirEntry::new("/mix/file1.txt", DirEntryType::File)));
+            assert!(entries.contains(&DirEntry::new("/mix/subdir", DirEntryType::Directory)));
             assert!(
                 !entries
                     .iter()
-                    .any(|&p| p.to_str().unwrap().contains("deep.txt")),
+                    .any(|p| p.path().to_str().unwrap().contains("deep.txt")),
                 "Deeper nested file should be excluded"
             );
 
@@ -1123,7 +1129,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let result: Result<Vec<&Path>> = fs
+            let result: Result<Vec<_>> = fs
                 .tree(Some("/nonexistent/path"))
                 .map(|iter| iter.collect());
 
@@ -1162,8 +1168,8 @@ mod tests {
                 2,
                 "Current directory should list two items"
             );
-            assert!(base_entries.contains(&Path::new("/base/sub")));
-            assert!(base_entries.contains(&Path::new("/base/note.txt")));
+            assert!(base_entries.contains(&DirEntry::new("/base/sub", DirEntryType::Directory)));
+            assert!(base_entries.contains(&DirEntry::new("/base/note.txt", DirEntryType::File)));
 
             Ok(())
         }
@@ -1185,12 +1191,12 @@ mod tests {
                 2,
                 "Should include both file and subdir at level"
             );
-            assert!(entries.contains(&Path::new("/проект/документ.txt")));
-            assert!(entries.contains(&Path::new("/проект/подпапка")));
+            assert!(entries.contains(&DirEntry::new("/проект/документ.txt", DirEntryType::File)));
+            assert!(entries.contains(&DirEntry::new("/проект/подпапка", DirEntryType::Directory)));
             assert!(
                 !entries
                     .iter()
-                    .any(|p| p.to_str().unwrap().contains("файл.txt")),
+                    .any(|p| p.path().to_str().unwrap().contains("файл.txt")),
                 "Nested unicode file should be excluded"
             );
 
@@ -1213,12 +1219,12 @@ mod tests {
                 2,
                 "Root should list immediate files and dirs"
             );
-            assert!(entries.contains(&Path::new("/a.txt")));
-            assert!(entries.contains(&Path::new("/sub")));
+            assert!(entries.contains(&DirEntry::new("/a.txt", DirEntryType::File)));
+            assert!(entries.contains(&DirEntry::new("/sub", DirEntryType::Directory)));
             assert!(
                 !entries
                     .iter()
-                    .any(|&p| p.to_str().unwrap().contains("inner.txt")),
+                    .any(|p| p.path().to_str().unwrap().contains("inner.txt")),
                 "Nested file in sub should be excluded"
             );
 
@@ -1278,7 +1284,7 @@ mod tests {
 
             let entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
             assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0], Path::new("/file.txt"));
+            assert_eq!(entries[0], DirEntry::new("/file.txt", DirEntryType::File));
 
             Ok(())
         }
@@ -1293,7 +1299,10 @@ mod tests {
 
             let entries: Vec<_> = fs.tree(Some("/docs"))?.collect();
             assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0], Path::new("/docs/readme.txt"));
+            assert_eq!(
+                entries[0],
+                DirEntry::new("/docs/readme.txt", DirEntryType::File)
+            );
 
             Ok(())
         }
@@ -1327,8 +1336,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let result: Result<Vec<&Path>> =
-                fs.tree(Some("/nonexistent")).map(|iter| iter.collect());
+            let result: Result<Vec<_>> = fs.tree(Some("/nonexistent")).map(|iter| iter.collect());
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("does not exist"));
 
@@ -1347,7 +1355,10 @@ mod tests {
 
             let entries: Vec<_> = fs.tree(Some("sub"))?.collect();
             assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0], Path::new("/docs/sub/file.txt"));
+            assert_eq!(
+                entries[0],
+                DirEntry::new("/docs/sub/file.txt", DirEntryType::File)
+            );
 
             Ok(())
         }
@@ -1365,9 +1376,12 @@ mod tests {
             let entries: Vec<_> = fs.tree(Some("/проект"))?.collect();
 
             assert_eq!(entries.len(), 3);
-            assert!(entries.contains(&Path::new("/проект/документ.txt")));
-            assert!(entries.contains(&Path::new("/проект/подпапка")));
-            assert!(entries.contains(&Path::new("/проект/подпапка/файл.txt")));
+            assert!(entries.contains(&DirEntry::new("/проект/документ.txt", DirEntryType::File)));
+            assert!(entries.contains(&DirEntry::new("/проект/подпапка", DirEntryType::Directory)));
+            assert!(entries.contains(&DirEntry::new(
+                "/проект/подпапка/файл.txt",
+                DirEntryType::File
+            )));
 
             Ok(())
         }
@@ -1383,8 +1397,16 @@ mod tests {
             let entries: Vec<_> = fs.tree(Some("/parent"))?.collect();
 
             // Should not include /parent itself, only its contents
-            assert!(!entries.iter().any(|&p| p == Path::new("/parent")));
-            assert!(entries.iter().any(|&p| p == Path::new("/parent/child.txt")));
+            assert!(
+                !entries
+                    .iter()
+                    .any(|p| p == &DirEntry::new("/parent", DirEntryType::Directory))
+            );
+            assert!(
+                entries
+                    .iter()
+                    .any(|p| p == &DirEntry::new("/parent/child.txt", DirEntryType::File))
+            );
 
             Ok(())
         }
@@ -1404,7 +1426,7 @@ mod tests {
             // We don't guarantee order, but all files should be present
             let entry_strings: Vec<String> = entries
                 .iter()
-                .map(|p| p.to_str().unwrap().to_string())
+                .map(|p| p.path().to_str().unwrap().to_string())
                 .collect();
 
             assert!(entry_strings.contains(&"/order_test/a.txt".to_string()));
@@ -1740,7 +1762,7 @@ mod tests {
 
             assert!(fs.exists("/file.txt"));
             assert!(root.join("file.txt").exists());
-            assert_eq!(fs.entries.contains(&PathBuf::from("/file.txt")), true);
+            assert_eq!(fs.entries.contains_key(&PathBuf::from("/file.txt")), true);
         }
 
         #[test]
@@ -2987,7 +3009,7 @@ mod tests {
 
             // Only entries (except "/") were removed
             assert_eq!(fs.entries.len(), 1);
-            assert!(fs.entries.contains(&PathBuf::from("/")));
+            assert!(fs.entries.contains_key(&PathBuf::from("/")));
         }
 
         #[test]
@@ -3002,7 +3024,7 @@ mod tests {
             fs.cleanup();
 
             assert_eq!(fs.entries.len(), 1); // "/" remained
-            assert!(fs.entries.contains(&PathBuf::from("/")));
+            assert!(fs.entries.contains_key(&PathBuf::from("/")));
             assert!(root.exists()); // The root is not removed
         }
     }
