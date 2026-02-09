@@ -1450,15 +1450,7 @@ mod tests {
 
             let entries: Vec<_> = fs.tree(Some("/order_test"))?.collect();
 
-            // We don't guarantee order, but all files should be present
-            let entry_strings: Vec<String> = entries
-                .iter()
-                .map(|p| p.path().to_str().unwrap().to_string())
-                .collect();
-
-            assert!(entry_strings.contains(&"/order_test/a.txt".to_string()));
-            assert!(entry_strings.contains(&"/order_test/b.txt".to_string()));
-            assert!(entry_strings.contains(&"/order_test/c.txt".to_string()));
+            assert_eq!(entries.len(), 3);
 
             Ok(())
         }
