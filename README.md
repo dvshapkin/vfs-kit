@@ -92,6 +92,8 @@ fn main() -> anyhow::Result<()> {
   + `cwd()` — get current working directory
   + `cd(path)` — change directory
   + `exists(path)` — check if path exists
+  + `ls(path)` — returns an iterator over directory entries
+  + `tree(path)` — returns a recursive iterator over the directory tree starting from a given path
   + `mkdir(path)` — creates directory
   + `mkfile(path, content)` — creates file with optional content
   + `read(path)` — read all contents of a file
