@@ -160,10 +160,10 @@ impl DirFS {
     /// use vfs_kit::{DirFS, FsBackend};
     ///
     /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut vfs = DirFS::new(temp_dir.path());
+    /// let mut vfs = DirFS::new(temp_dir.path()).unwrap();
     ///
-    /// vfs.mkdir("/docs/backup").unwrap();
-    /// vfs.mkfile("/docs/readme.txt").unwrap();
+    /// vfs.mkdir("/docs/backup");
+    /// vfs.mkfile("/docs/readme.txt", None);
     ///
     /// // Forget the entire /docs directory (and all its contents)
     /// vfs.forget("/docs").unwrap();
@@ -176,7 +176,7 @@ impl DirFS {
     /// use vfs_kit::{DirFS, FsBackend};
     ///
     /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut vfs = DirFS::new(temp_dir.path());
+    /// let mut vfs = DirFS::new(temp_dir.path()).unwrap();
     ///
     /// // Error: trying to forget a non-existent path
     /// assert!(vfs.forget("/nonexistent").is_err());
@@ -403,13 +403,17 @@ impl FsBackend for DirFS {
     ///
     /// # Example:
     /// ```
-    /// use vfs_kit::{DirFS, FsBackend};
+    /// use std::path::Path;
+    /// use vfs_kit::{DirEntry, DirFS, FsBackend};
     ///
     /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut fs = DirFS::new(temp_dir.path());
+    /// let mut fs = DirFS::new(temp_dir.path()).unwrap();
+    ///
+    /// fs.mkdir("/docs/subdir");
+    /// fs.mkfile("/docs/document.txt");
     ///
     /// // List current directory contents
-    /// for entry in fs.ls(None).unwrap() {
+    /// for entry in fs.ls::<&Path>(None).unwrap() {
     ///     println!("{:?}", entry);
     /// }
     ///
@@ -472,13 +476,17 @@ impl FsBackend for DirFS {
     ///
     /// # Example:
     /// ```
+    /// use std::path::Path;
     /// use vfs_kit::{DirFS, FsBackend};
     ///
     /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut fs = DirFS::new(temp_dir.path());
+    /// let mut fs = DirFS::new(temp_dir.path()).unwrap();
+    ///
+    /// fs.mkdir("/docs/subdir");
+    /// fs.mkfile("/docs/document.txt", None);
     ///
     /// // Iterate over current working directory
-    /// for entry in fs.tree(None).unwrap() {
+    /// for entry in fs.tree::<&Path>(None).unwrap() {
     ///     println!("{:?}", entry);
     /// }
     ///
