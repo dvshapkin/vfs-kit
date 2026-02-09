@@ -346,11 +346,17 @@ impl FsBackend for DirFS {
     /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
     ///   during iteration.
     fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>> {
-        let path = self.inner_or_cwd(path)?;
-        let slash_count = path.to_str().unwrap().matches('/').count();
+        let inner_path = self.inner_or_cwd(path)?;
+        let component_count = inner_path.components().count() + 1;
         Ok(self
-            .tree(Some(path))?
-            .filter(move |&entry| entry.to_str().unwrap().matches('/').count() <= slash_count + 1))
+            .entries
+            .iter()
+            .map(|entry| entry.as_path())
+            .filter(move |&entry| {
+                entry.starts_with(&inner_path)
+                    && entry != inner_path
+                    && entry.components().count() == component_count
+            }))
     }
 
     /// Returns a recursive iterator over the directory tree starting from a given path.
@@ -934,6 +940,228 @@ mod tests {
         }
     }
 
+    mod ls {
+        use super::*;
+
+        #[test]
+        fn test_ls_empty_cwd() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let entries: Vec<_> = fs.ls::<&Path>(None)?.collect();
+            assert!(entries.is_empty(), "CWD should have no entries");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_single_file_in_cwd() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/file.txt", Some(b"Hello"))?;
+
+            let entries: Vec<_> = fs.ls::<&Path>(None)?.collect();
+            assert_eq!(entries.len(), 1, "Should return exactly one file");
+            assert_eq!(entries[0], Path::new("/file.txt"), "File path should match");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_multiple_items_in_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/docs")?;
+            fs.mkfile("/docs/readme.txt", None)?;
+            fs.mkfile("/docs/todo.txt", None)?;
+
+            let entries: Vec<_> = fs.ls(Some("/docs"))?.collect();
+
+            assert_eq!(entries.len(), 2, "Should list both files in directory");
+            assert!(entries.contains(&Path::new("/docs/readme.txt")));
+            assert!(entries.contains(&Path::new("/docs/todo.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_nested_files_excluded() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/project/src")?;
+            fs.mkfile("/project/main.rs", None)?;
+            fs.mkfile("/project/src/lib.rs", None)?; // nested - should be excluded
+
+            let entries: Vec<_> = fs.ls(Some("/project"))?.collect();
+
+            assert_eq!(entries.len(), 2, "Only immediate children should be listed");
+            assert!(entries.contains(&Path::new("/project/main.rs")));
+            assert!(
+                !entries
+                    .iter()
+                    .any(|&p| p == Path::new("/project/src/lib.rs")),
+                "Nested file should not be included"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_directories_and_files_mixed() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/mix")?;
+            fs.mkfile("/mix/file1.txt", None)?;
+            fs.mkdir("/mix/subdir")?; // subdirectory - should be included
+            fs.mkfile("/mix/subdir/deep.txt", None)?; // deeper - should be excluded
+
+            let entries: Vec<_> = fs.ls(Some("/mix"))?.collect();
+
+            assert_eq!(
+                entries.len(),
+                2,
+                "Both file and subdirectory should be listed"
+            );
+            assert!(entries.contains(&Path::new("/mix/file1.txt")));
+            assert!(entries.contains(&Path::new("/mix/subdir")));
+            assert!(
+                !entries
+                    .iter()
+                    .any(|&p| p.to_str().unwrap().contains("deep.txt")),
+                "Deeper nested file should be excluded"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_nonexistent_path_returns_error() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let result: Result<Vec<&Path>> = fs
+                .tree(Some("/nonexistent/path"))
+                .map(|iter| iter.collect());
+
+            assert!(result.is_err(), "Should return error for nonexistent path");
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error message should indicate path does not exist"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_relative_path_resolution() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/base")?;
+            fs.cd("/base")?;
+            fs.mkdir("sub")?;
+            fs.mkfile("sub/file.txt", None)?;
+            fs.mkfile("note.txt", None)?;
+
+            // List contents of relative path "sub"
+            let sub_entries: Vec<_> = fs.ls(Some("sub"))?.collect();
+            assert_eq!(
+                sub_entries.len(),
+                1,
+                "Current directory should list one item"
+            );
+
+            // List current directory (base)
+            let base_entries: Vec<_> = fs.ls(Some("."))?.collect();
+            assert_eq!(
+                base_entries.len(),
+                2,
+                "Current directory should list two items"
+            );
+            assert!(base_entries.contains(&Path::new("/base/sub")));
+            assert!(base_entries.contains(&Path::new("/base/note.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_unicode_path_support() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/проект")?;
+            fs.mkfile("/проект/документ.txt", Some(b"Content"))?;
+            fs.mkdir("/проект/подпапка")?;
+            fs.mkfile("/проект/подпапка/файл.txt", Some(b"Nested"))?; // should be excluded
+
+            let entries: Vec<_> = fs.ls(Some("/проект"))?.collect();
+
+            assert_eq!(
+                entries.len(),
+                2,
+                "Should include both file and subdir at level"
+            );
+            assert!(entries.contains(&Path::new("/проект/документ.txt")));
+            assert!(entries.contains(&Path::new("/проект/подпапка")));
+            assert!(
+                !entries
+                    .iter()
+                    .any(|p| p.to_str().unwrap().contains("файл.txt")),
+                "Nested unicode file should be excluded"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_root_directory_listing() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/a.txt", None)?;
+            fs.mkdir("/sub")?;
+            fs.mkfile("/sub/inner.txt", None)?; // should be excluded (nested)
+
+            let entries: Vec<_> = fs.ls(Some("/"))?.collect();
+
+            assert_eq!(
+                entries.len(),
+                2,
+                "Root should list immediate files and dirs"
+            );
+            assert!(entries.contains(&Path::new("/a.txt")));
+            assert!(entries.contains(&Path::new("/sub")));
+            assert!(
+                !entries
+                    .iter()
+                    .any(|&p| p.to_str().unwrap().contains("inner.txt")),
+                "Nested file in sub should be excluded"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_empty_directory_returns_empty() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/empty")?;
+
+            let entries: Vec<_> = fs.ls(Some("/empty"))?.collect();
+            assert!(
+                entries.is_empty(),
+                "Empty directory should return no entries"
+            );
+
+            Ok(())
+        }
+    }
+
     mod tree {
         use super::*;
 
@@ -1019,8 +1247,8 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let result: Result<Vec<&Path>> = fs.tree(Some("/nonexistent"))
-                .map(|iter| iter.collect());
+            let result: Result<Vec<&Path>> =
+                fs.tree(Some("/nonexistent")).map(|iter| iter.collect());
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("does not exist"));
 
