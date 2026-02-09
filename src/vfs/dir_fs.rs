@@ -11,6 +11,7 @@
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::FileType;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -243,8 +244,7 @@ impl DirFS {
 
     fn is_inner_root<P: AsRef<Path>>(path: P) -> bool {
         let components: Vec<_> = path.as_ref().components().collect();
-        components.len() == 1
-            && components[0] == Component::RootDir
+        components.len() == 1 && components[0] == Component::RootDir
     }
 
     /// Make directories recursively.
@@ -503,7 +503,7 @@ impl FsBackend for DirFS {
         let mut existed_parent = inner_path.clone();
         while let Some(parent) = existed_parent.parent() {
             let parent_buf = parent.to_path_buf();
-            if self.entries.contains(parent) {
+            if self.exists(parent) {
                 existed_parent = parent_buf;
                 break;
             }
@@ -519,10 +519,13 @@ impl FsBackend for DirFS {
         let mut built = PathBuf::from(&existed_parent);
         for component in need_to_create {
             built.push(component);
-            if !self.entries.contains(&built) {
+            if !self.exists(&built) {
                 let host = self.to_host(&built);
                 std::fs::create_dir(&host)?;
-                self.entries.insert(built.clone());
+                self.entries.insert(
+                    built.clone(),
+                    DirEntry::new(&built, DirEntryType::Directory),
+                );
             }
         }
 
@@ -542,7 +545,7 @@ impl FsBackend for DirFS {
         }
         let host = self.to_host(&file_path);
         let mut fd = std::fs::File::create(host)?;
-        self.entries.insert(file_path);
+        self.entries.insert(file_path.clone(), DirEntry::new(&file_path, DirEntryType::File));
         if let Some(content) = content {
             fd.write_all(content)?;
         }
@@ -568,12 +571,14 @@ impl FsBackend for DirFS {
         if !self.exists(&inner) {
             return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
         }
-        let host = self.to_host(&inner);
-        if host.is_dir() {
-            return Err(anyhow!("{} is a directory", host.display()));
+        if let Some(entry) = self.entries.get(&inner) {
+            if entry.is_dir() {
+                return Err(anyhow!("{} is a directory", inner.display()));
+            }
         }
 
         let mut content = Vec::new();
+        let host = self.to_host(&inner);
         std::fs::File::open(&host)?.read_to_end(&mut content)?;
 
         Ok(content)
@@ -598,15 +603,16 @@ impl FsBackend for DirFS {
     /// - **Permissions**: The file retains its original permissions (no chmod is performed).
     fn write<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
-        let host = self.to_host(&inner);
-
         if !self.exists(&inner) {
             return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
         }
-        if host.is_dir() {
-            return Err(anyhow!("{} is a directory", host.display()));
+        if let Some(entry) = self.entries.get(&inner) {
+            if entry.is_dir() {
+                return Err(anyhow!("{} is a directory", inner.display()));
+            }
         }
 
+        let host = self.to_host(&inner);
         std::fs::write(&host, content)?;
 
         Ok(())
@@ -633,17 +639,18 @@ impl FsBackend for DirFS {
     /// - **Permissions**: The file retains its original permissions.
     fn append<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
-        let host = self.to_host(&inner);
-
         if !self.exists(&inner) {
             return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
         }
-        if host.is_dir() {
-            return Err(anyhow!("{} is a directory", host.display()));
+        if let Some(entry) = self.entries.get(&inner) {
+            if entry.is_dir() {
+                return Err(anyhow!("{} is a directory", inner.display()));
+            }
         }
 
         // Open file in append mode and write content
         use std::fs::OpenOptions;
+        let host = self.to_host(&inner);
         let mut file = OpenOptions::new().write(true).append(true).open(&host)?;
 
         file.write_all(content)?;
@@ -667,7 +674,7 @@ impl FsBackend for DirFS {
         if path.as_ref().as_os_str().is_empty() {
             return Err(anyhow!("invalid path: empty"));
         }
-        if path.as_ref().as_os_str() == "/" {
+        if Self::is_inner_root(path) {
             return Err(anyhow!("invalid path: the root cannot be removed"));
         }
 
@@ -686,13 +693,14 @@ impl FsBackend for DirFS {
         let removed: Vec<PathBuf> = self
             .entries
             .iter()
-            .filter(|p| p.starts_with(&inner_path)) // Match prefix (includes subpaths)
+            .map(|(entry_path, _)| entry_path)
+            .filter(|&p| p.starts_with(&inner_path)) // Match prefix (includes subpaths)
             .cloned()
             .collect();
 
         // Remove all matched entries from the set
-        for p in removed {
-            self.entries.remove(&p);
+        for p in &removed {
+            self.entries.remove(p);
         }
 
         Ok(())
@@ -704,9 +712,9 @@ impl FsBackend for DirFS {
 
         // Collect all paths to delete (except the root "/")
         let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
-        for entry in &self.entries {
-            if entry != &PathBuf::from("/") {
-                sorted_paths_to_remove.insert(entry.clone());
+        for (path, entry) in &self.entries {
+            if !entry.is_root() {
+                sorted_paths_to_remove.insert(path.clone());
             }
         }
 
