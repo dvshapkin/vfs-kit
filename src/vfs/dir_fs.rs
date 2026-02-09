@@ -157,7 +157,11 @@ impl DirFS {
     /// # Examples
     ///
     /// ```
-    /// let mut vfs = DirFS::new("/tmp");
+    /// use vfs_kit::{DirFS, FsBackend};
+    ///
+    /// let temp_dir = tempdir::TempDir::new("vfs_example")?;
+    /// let mut vfs = DirFS::new(temp_dir.path());
+    ///
     /// vfs.mkdir("/docs/backup")?;
     /// vfs.mkfile("/docs/readme.txt")?;
     ///
@@ -169,6 +173,11 @@ impl DirFS {
     /// ```
     ///
     /// ```
+    /// use vfs_kit::{DirFS, FsBackend};
+    ///
+    /// let temp_dir = tempdir::TempDir::new("vfs_example")?;
+    /// let mut vfs = DirFS::new(temp_dir.path());
+    ///
     /// // Error: trying to forget a non-existent path
     /// assert!(vfs.forget("/nonexistent").is_err());
     ///
@@ -394,6 +403,11 @@ impl FsBackend for DirFS {
     ///
     /// # Example:
     /// ```
+    /// use vfs_kit::{DirFS, FsBackend};
+    ///
+    /// let temp_dir = tempdir::TempDir::new("vfs_example")?;
+    /// let mut fs = DirFS::new(temp_dir.path());
+    ///
     /// // List current directory contents
     /// for entry in fs.ls(None)? {
     ///     println!("{:?}", entry);
@@ -458,6 +472,11 @@ impl FsBackend for DirFS {
     ///
     /// # Example:
     /// ```
+    /// use vfs_kit::{DirFS, FsBackend};
+    ///
+    /// let temp_dir = tempdir::TempDir::new("vfs_example")?;
+    /// let mut fs = DirFS::new(temp_dir.path());
+    ///
     /// // Iterate over current working directory
     /// for entry in fs.tree(None)? {
     ///     println!("{:?}", entry);
