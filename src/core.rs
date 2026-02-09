@@ -18,6 +18,13 @@ pub trait FsBackend {
 
     /// Returns true, if `path` exists.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
+    
+    /// Returns an iterator over directory entries.
+    /// `path` is a directory, or CWD if None.
+    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>>;
+
+    /// Returns a recursive iterator over the directory tree starting from a given path.
+    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>>;
 
     /// Creates directory and all it parents, if necessary.
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;

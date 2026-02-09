@@ -133,7 +133,8 @@ impl DirFS {
         self.entries.remove(&inner);
 
         if host.is_dir() {
-            let childs: Vec<_> = self.entries
+            let childs: Vec<_> = self
+                .entries
                 .iter()
                 .filter(|&entry| entry.starts_with(&inner))
                 .cloned()
@@ -253,6 +254,19 @@ impl DirFS {
 
         Ok(())
     }
+
+    fn inner_or_cwd<P: AsRef<Path>>(&self, path: Option<P>) -> Result<PathBuf> {
+        Ok(match path {
+            Some(p) => {
+                let inner = self.to_inner(&p);
+                if !self.exists(&inner) {
+                    return Err(anyhow!("{} does not exist", p.as_ref().display()));
+                }
+                inner
+            }
+            None => self.cwd().to_path_buf(),
+        })
+    }
 }
 
 impl FsBackend for DirFS {
@@ -284,8 +298,114 @@ impl FsBackend for DirFS {
     /// - relative (relative to the vfs cwd),
     /// - contain '..' or '.'.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
-        let inner_path = self.to_inner(path);
-        self.entries.contains(&inner_path)
+        let inner = self.to_inner(path);
+        self.entries.contains(&inner)
+    }
+
+    /// Returns an iterator over directory entries at a specific depth (shallow listing).
+    ///
+    /// This method lists only the **immediate children** of the given directory (or CWD if `None`),
+    /// i.e., entries that are exactly one level below the specified path.
+    /// It does *not* recurse into subdirectories (see `tree()` if you need recurse).
+    ///
+    /// # Arguments
+    /// * `path` - Optional path to the directory to list:
+    ///   - `Some(p)`: list contents of directory `p` (must exist in VFS).
+    ///   - `None`: list contents of the current working directory (`cwd`).
+    ///
+    /// # Returns
+    /// * `Ok(impl Iterator<Item = &Path>)` - Iterator over paths of immediate children
+    ///   (relative to VFS root). The yielded paths are *inside* the target directory
+    ///   but do not include deeper nesting.
+    /// * `Err(anyhow::Error)` - If the specified path does not exist in VFS.
+    ///
+    /// # Example:
+    /// ```
+    /// // List current directory contents
+    /// for entry in fs.ls(None)? {
+    ///     println!("{}", entry.display());
+    /// }
+    ///
+    /// // List contents of "/docs"
+    /// for entry in fs.ls(Some("/docs"))? {
+    ///     if entry.is_file() {
+    ///         println!("File: {}", entry.display());
+    ///     } else {
+    ///         println!("Dir:  {}", entry.display());
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Notes
+    /// - **No recursion:** Unlike `tree()`, this method does *not* traverse subdirectories.
+    /// - **Path ownership:** The returned iterator borrows from the VFS's internal state.
+    ///   It is valid as long as `self` lives.
+    /// - **Order:** Entries are yielded in arbitrary order.
+    /// - **Excludes root:** The input directory itself is not included in the output.
+    /// - **Error handling:** If `path` does not exist, an error is returned before iteration.
+    /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
+    ///   during iteration.
+    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>> {
+        let path = self.inner_or_cwd(path)?;
+        let slash_count = path.to_str().unwrap().matches('/').count();
+        Ok(self
+            .tree(Some(path))?
+            .filter(move |&entry| entry.to_str().unwrap().matches('/').count() <= slash_count + 1))
+    }
+
+    /// Returns a recursive iterator over the directory tree starting from a given path.
+    ///
+    /// The iterator yields all entries (files and directories) that are *inside* the specified
+    /// directory (i.e., the starting directory itself is **not** included).
+    ///
+    /// # Arguments
+    /// * `path` - Optional path to the directory to traverse:
+    ///   - `Some(p)`: start from directory `p` (must exist in VFS).
+    ///   - `None`: start from the current working directory (`cwd`).
+    ///
+    /// # Returns
+    /// * `Ok(impl Iterator<Item = &Path>)` - Iterator over all paths *within* the tree
+    ///   (relative to VFS root), excluding the root of the traversal.
+    /// * `Err(anyhow::Error)` - If:
+    ///   - The specified path does not exist in VFS.
+    ///   - The path is not a directory (implicitly checked via `exists` and tree structure).
+    ///
+    /// # Behavior
+    /// - **Recursive traversal**: Includes all nested files and directories.
+    /// - **Excludes root**: The starting directory path is not yielded (only its contents).
+    /// - **Path normalization**: Input path is normalized.
+    /// - **VFS-only**: Only returns paths tracked in VFS.
+    /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
+    ///   during iteration.
+    ///
+    /// # Example:
+    /// ```
+    /// // Iterate over current working directory
+    /// for entry in fs.tree(None)? {
+    ///     println!("{}", entry.display());
+    /// }
+    ///
+    /// // Iterate over a specific directory
+    /// for entry in fs.tree(Some("/docs"))? {
+    ///     if entry.is_file() {
+    ///         println!("File: {}", entry.display());
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Notes
+    /// - The iterator borrows data from VFS. The returned iterator is valid as long
+    ///   as `self` is alive.
+    /// - Entries are yielded in arbitrary order (based on `HashSet` iteration).
+    /// - Symbolic links are treated as regular entries (no follow/resolve).
+    /// - Use `Path` methods (e.g., `is_file()`, `is_dir()`) on yielded items for type checks.
+    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>> {
+        let path = self.inner_or_cwd(path)?;
+        Ok(self
+            .entries
+            .iter()
+            .map(|entry| entry.as_path())
+            .filter(move |&entry| entry.starts_with(&path) && entry != path))
     }
 
     /// Creates directory and all it parents (if needed).
@@ -811,6 +931,179 @@ mod tests {
             assert!(fs.exists("."));
             assert!(fs.exists("./"));
             assert!(fs.exists("/projects"));
+        }
+    }
+
+    mod tree {
+        use super::*;
+
+        #[test]
+        fn test_tree_current_directory_empty() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
+            assert!(entries.is_empty());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_specific_directory_empty() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/empty_dir")?;
+
+            let entries: Vec<_> = fs.tree(Some("/empty_dir"))?.collect();
+            assert!(entries.is_empty());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_single_file_in_cwd() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkfile("/file.txt", Some(b"Content"))?;
+
+            let entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0], Path::new("/file.txt"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_file_in_subdirectory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/docs")?;
+            fs.mkfile("/docs/readme.txt", Some(b"Docs"))?;
+
+            let entries: Vec<_> = fs.tree(Some("/docs"))?.collect();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0], Path::new("/docs/readme.txt"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_nested_structure() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            // Create nested structure
+            fs.mkdir("/project")?;
+            fs.mkdir("/project/src")?;
+            fs.mkdir("/project/tests")?;
+            fs.mkfile("/project/main.rs", Some(b"fn main() {}"))?;
+            fs.mkfile("/project/src/lib.rs", Some(b"mod utils;"))?;
+            fs.mkfile("/project/tests/test.rs", Some(b"#[test] fn it_works() {}"))?;
+
+            // Test tree from root
+            let root_entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
+            assert_eq!(root_entries.len(), 6); // /project, /project/src, /project/tests, /project/main.rs, /project/src/lib.rs, /project/tests/test.rs
+
+            // Test tree from /project
+            let project_entries: Vec<_> = fs.tree(Some("/project"))?.collect();
+            assert_eq!(project_entries.len(), 5); // /project/src, /project/tests, /project/main.rs, /project/src/lib.rs, /project/tests/test.rs
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_nonexistent_path_error() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(temp_dir.path())?;
+
+            let result: Result<Vec<&Path>> = fs.tree(Some("/nonexistent"))
+                .map(|iter| iter.collect());
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("does not exist"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_relative_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/docs")?;
+            fs.cd("/docs")?;
+            fs.mkdir("sub")?;
+            fs.mkfile("sub/file.txt", Some(b"Relative"))?;
+
+            let entries: Vec<_> = fs.tree(Some("sub"))?.collect();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0], Path::new("/docs/sub/file.txt"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_unicode_paths() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/проект")?;
+            fs.mkfile("/проект/документ.txt", Some(b"Unicode"))?;
+            fs.mkdir("/проект/подпапка")?;
+            fs.mkfile("/проект/подпапка/файл.txt", Some(b"Nested unicode"))?;
+
+            let entries: Vec<_> = fs.tree(Some("/проект"))?.collect();
+
+            assert_eq!(entries.len(), 3);
+            assert!(entries.contains(&Path::new("/проект/документ.txt")));
+            assert!(entries.contains(&Path::new("/проект/подпапка")));
+            assert!(entries.contains(&Path::new("/проект/подпапка/файл.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_no_root_inclusion() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/parent")?;
+            fs.mkfile("/parent/child.txt", Some(b"Child"))?;
+
+            let entries: Vec<_> = fs.tree(Some("/parent"))?.collect();
+
+            // Should not include /parent itself, only its contents
+            assert!(!entries.iter().any(|&p| p == Path::new("/parent")));
+            assert!(entries.iter().any(|&p| p == Path::new("/parent/child.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_order_independence() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut fs = DirFS::new(temp_dir.path())?;
+
+            fs.mkdir("/order_test")?;
+            fs.mkfile("/order_test/a.txt", None)?;
+            fs.mkfile("/order_test/b.txt", None)?;
+            fs.mkfile("/order_test/c.txt", None)?;
+
+            let entries: Vec<_> = fs.tree(Some("/order_test"))?.collect();
+
+            // We don't guarantee order, but all files should be present
+            let entry_strings: Vec<String> = entries
+                .iter()
+                .map(|p| p.to_str().unwrap().to_string())
+                .collect();
+
+            assert!(entry_strings.contains(&"/order_test/a.txt".to_string()));
+            assert!(entry_strings.contains(&"/order_test/b.txt".to_string()));
+            assert!(entry_strings.contains(&"/order_test/c.txt".to_string()));
+
+            Ok(())
         }
     }
 

@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `forget()` method for DirFS (excludes an existing file or directory from VFS)
+- `ls()` method for `FsBackend` and realized it in DirFS
+- `tree()` method for `FsBackend` and realized it in DirFS
 
 ### Changed
 - `add()` if artifact is directory - all its childs will be added recursively.

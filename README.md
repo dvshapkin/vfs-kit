@@ -52,7 +52,7 @@ cargo add vfs-kit
 1. Add `vfs-kit` to your `Cargo.toml`.
 2. Choose a backend (`DirFS` for real dirs, plan `MapFS` for memory).
 3. Create an instance with a root path.
-4. Use `mkdir`, `mkfile`, `rm`, `cd`, `read`, `write`, `append` and `exists` as needed.
+4. Use `mkdir`, `mkfile`, `rm`, `cd` and other commands as needed.
 5. Let the VFS clean up on drop (or disable auto‑cleanup).
 
 ## Usage Example
@@ -79,7 +79,7 @@ fn main() -> anyhow::Result<()> {
     fs.rm("/docs/note.txt")?;
     assert!(!fs.exists("/docs/note.txt"));
     
-    // On drop, temp_dir is cleaned up automatically (if is_auto_clean=true)
+    // On drop, VFS is cleaned up automatically (if is_auto_clean=true)
     Ok(())
 }
 ```
