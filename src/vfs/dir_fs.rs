@@ -189,7 +189,7 @@ impl DirFS {
     ///
     /// * The method does **not** interact with the real filesystem — it only affects the VFS's
     ///   internal tracking.
-    /// * If the path does not exist in the VFS, the method returns an error
+    /// * If the path does not exist in the VFS, the method returns an error 
     ///   (unlike `remove` in some systems that may silently succeed).
     pub fn forget<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let inner = self.to_inner(&path);
