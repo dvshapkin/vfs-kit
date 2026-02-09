@@ -410,7 +410,7 @@ impl FsBackend for DirFS {
     /// let mut fs = DirFS::new(temp_dir.path()).unwrap();
     ///
     /// fs.mkdir("/docs/subdir");
-    /// fs.mkfile("/docs/document.txt");
+    /// fs.mkfile("/docs/document.txt", None);
     ///
     /// // List current directory contents
     /// for entry in fs.ls::<&Path>(None).unwrap() {
