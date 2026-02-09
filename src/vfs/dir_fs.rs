@@ -340,7 +340,6 @@ impl FsBackend for DirFS {
     /// - **No recursion:** Unlike `tree()`, this method does *not* traverse subdirectories.
     /// - **Path ownership:** The returned iterator borrows from the VFS's internal state.
     ///   It is valid as long as `self` lives.
-    /// - **Order:** Entries are yielded in arbitrary order.
     /// - **Excludes root:** The input directory itself is not included in the output.
     /// - **Error handling:** If `path` does not exist, an error is returned before iteration.
     /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
@@ -402,7 +401,6 @@ impl FsBackend for DirFS {
     /// # Notes
     /// - The iterator borrows data from VFS. The returned iterator is valid as long
     ///   as `self` is alive.
-    /// - Entries are yielded in arbitrary order (based on `HashSet` iteration).
     /// - Symbolic links are treated as regular entries (no follow/resolve).
     /// - Use `Path` methods (e.g., `is_file()`, `is_dir()`) on yielded items for type checks.
     fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = &Path>> {

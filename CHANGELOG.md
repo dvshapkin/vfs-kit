@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.12] - 2026-02-06
 
 ### Added
+- new abstraction `DirEntry`
 - `forget()` method for DirFS (excludes an existing file or directory from VFS)
 - `ls()` method for `FsBackend` and realized it in DirFS
 - `tree()` method for `FsBackend` and realized it in DirFS
 
 ### Changed
-- `add()` if artifact is directory - all its childs will be added recursively.
+- `add()` if artifact is directory - all its childs will be added recursively
+- inner implementation of `DirFS` for performance optimization in `exists()`, `mkdir()`, `rm()`, `cleanup()` and others
 
 ## [0.1.11] - 2026-02-05
 
