@@ -678,7 +678,11 @@ impl FsBackend for DirFS {
         // Remove from the real filesystem
         if let Err(e) = Self::rm_host_artifact(host_path) {
             // TODO: needs more exact error checking
-            if !e.to_string().contains("No such file or directory") {
+            if e.to_string().contains("No such file or directory") {
+                // on Unix
+            } else if e.to_string().contains("Unable to remove") {
+                // on Windows
+            } else {
                 return Err(e);
             }
         }
