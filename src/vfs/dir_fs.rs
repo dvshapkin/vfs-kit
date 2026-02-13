@@ -151,9 +151,7 @@ impl DirFS {
     ///
     /// # Examples
     ///
-    /// ```
-    /// #![ignore]
-    ///
+    /// ```no_run
     /// vfs.mkdir("/docs/backup");
     /// vfs.mkfile("/docs/readme.txt", None);
     ///
@@ -164,9 +162,7 @@ impl DirFS {
     /// assert!(!vfs.exists("/docs/backup"));
     /// ```
     ///
-    /// ```
-    /// #![ignore]
-    ///
+    /// ```no_run
     /// // Error: trying to forget a non-existent path
     /// assert!(vfs.forget("/nonexistent").is_err());
     ///
@@ -373,9 +369,7 @@ impl FsBackend for DirFS {
     /// * `Err(anyhow::Error)` - If the specified path does not exist in VFS.
     ///
     /// # Example:
-    /// ```
-    /// #![ignore]
-    ///
+    ///```no_run
     /// fs.mkdir("/docs/subdir");
     /// fs.mkfile("/docs/document.txt", None);
     ///
@@ -443,9 +437,7 @@ impl FsBackend for DirFS {
     ///   during iteration.
     ///
     /// # Example:
-    /// ```
-    /// #![ignore]
-    ///
+    /// ```no_run
     /// fs.mkdir("/docs/subdir");
     /// fs.mkfile("/docs/document.txt", None);
     ///
