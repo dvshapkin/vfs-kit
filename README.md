@@ -28,9 +28,8 @@ cargo add vfs-kit
 ## What's new in last version?
 ### [0.1.13]
 ### Changed
-- This version doesn't add any new features, but it does provide improved documentation.
-  I've decided to abandon the neural network-generated text in favor of less formal,
-  yet more informative and useful, documentation written by myself.
+- This version is entirely dedicated to improving the documentation. I've decided to abandon the neural 
+  network-generated text in favor of less formal, yet more informative and useful, documentation written by myself.
 - Also, the changes affected two functions:
   `ls()` and `tree()` - they no longer work with an implicit path parameter.
 
