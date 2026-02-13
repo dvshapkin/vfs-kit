@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - This version doesn't add any new features, but it does provide improved documentation. 
   I've decided to abandon the neural network-generated text in favor of less formal, 
-  yet more informative and useful, documentation written by me.
+  yet more informative and useful, documentation written by myself.
 - Also, the changes affected two functions:
   `ls()` and `tree()` - they no longer work with an implicit path parameter.
   
