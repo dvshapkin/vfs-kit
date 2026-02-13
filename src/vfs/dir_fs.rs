@@ -13,7 +13,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-
 use anyhow::anyhow;
 
 use crate::core::{FsBackend, Result};
@@ -660,8 +659,7 @@ impl FsBackend for DirFS {
     /// Removes a file or directory at the specified path.
     ///
     /// - `path`: can be absolute (starting with '/') or relative to the current working
-    /// directory (cwd).
-    /// - If the path is a directory, all its contents are removed recursively.
+    /// directory (cwd). If the path is a directory, all its contents are removed recursively.
     ///
     /// Returns:
     /// - `Ok(())` on successful removal.
@@ -686,7 +684,12 @@ impl FsBackend for DirFS {
         }
 
         // Remove from the real filesystem
-        Self::rm_host_artifact(host_path)?;
+        if let Err(e) = Self::rm_host_artifact(host_path) {
+            // TODO: needs more exact error checking
+            if !e.to_string().contains("No such file or directory") {
+                return Err(e);
+            }
+        }
 
         // Update internal state: collect all entries that start with `inner_path`
         let removed: Vec<PathBuf> = self
@@ -2928,6 +2931,22 @@ mod tests {
 
             assert!(!fs.exists("/projects/notes.txt"));
             assert!(!temp_dir.path().join("projects/notes.txt").exists());
+        }
+
+        #[test]
+        fn test_rm_not_existed_on_host() {
+            let temp_dir = setup_test_env();
+            std::fs::File::create(temp_dir.path().join("host-file.txt")).unwrap();
+
+            let mut fs = DirFS::new(temp_dir.path()).unwrap();
+            fs.add("/host-file.txt").unwrap();
+
+            assert!(fs.exists("/host-file.txt"));
+
+            std::fs::remove_file(fs.root().join("host-file.txt")).unwrap();
+            let result = fs.rm("/host-file.txt");
+
+            assert!(result.is_ok());
         }
     }
 
