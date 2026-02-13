@@ -6,32 +6,9 @@ Virtual File System Toolkit
 [![Tests](https://github.com/dvshapkin/vfs-kit/actions/workflows/ci.yaml/badge.svg)](https://github.com/dvshapkin/vfs-kit/actions/workflows/ci.yaml)
 [![Documentation](https://docs.rs/vfs-kit/badge.svg)](https://docs.rs/vfs-kit)
 
-A lightweight, extensible virtual filesystem (VFS) toolkit for Rust. Provides in‑process abstractions over real 
-or simulated filesystems, ideal for testing, sandboxing, custom storage backends, and so on.
-
-## Overview
-
-`vfs-kit` lets you work with filesystem-like structures in Rust without touching the real disk (unless you want to). 
-It defines a common `FsBackend` trait and provides concrete implementations like `DirFS` that map to real directories.
-
-**Key ideas**:
-- **Abstraction**: Treat different storage backends (real dirs, memory maps, etc.) via a unified API.
-- **Safety**: Operations are confined to a root path; no accidental host filesystem access.
-- **Testability**: Use in unit tests to simulate filesystems without side effects.
-- **Extensibility**: Plug in new backends by implementing `FsBackend`.
-- **Clarity**: Comprehensive error messages and documentation.
-
-## Features
-
-- Path normalization (`.`, `..`, trailing slashes)
-- Current working directory (`cwd`) support
-- Create/read/write/remove files and directories
-- Existence checks and state tracking
-- Auto‑cleanup on drop (optional)
-- Cross‑platform path handling
-- Rich error messages via `anyhow`
-- Clean, documented API
-- Easy to extend with custom backends
+A lightweight, extensible set of virtual file systems (VFS) for Rust.
+Provides abstractions over real or pseudo-file systems. Ideal for testing,
+isolated sandboxing, custom storage backends, and more.
 
 ## Installation
 
@@ -48,41 +25,136 @@ Or via `cargo add`:
 cargo add vfs-kit
 ```
 
-## Getting Started
-1. Add `vfs-kit` to your `Cargo.toml`.
-2. Choose a backend (`DirFS` for real dirs, plan `MapFS` for memory).
-3. Create an instance with a root path.
-4. Use `mkdir`, `mkfile`, `rm`, `cd`, `read`, `write`, `append` and `exists` as needed.
-5. Let the VFS clean up on drop (or disable auto‑cleanup).
+## What's new in last version?
+### [0.1.13]
+### Changed
+- This version is entirely dedicated to improving the documentation. I've decided to abandon the neural 
+  network-generated text in favor of less formal, yet more informative and useful, documentation written by myself.
+- Also, the changes affected three functions:
+  + `mkfile()` - if the parent directory not exists, it will be created.
+  + `ls()` and `tree()` - they no longer work with an implicit path parameter.
 
-## Usage Example
+## Overview
 
-```rust
-use vfs_kit::{DirFS, FsBackend};
-use std::path::Path;
+`vfs-kit` allows you to work with filesystem-like structures in Rust without touching the actual disk (unless you want to). 
+It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS`, which map to actual directories.
 
-fn main() -> anyhow::Result<()> {
-    // Create a VFS rooted at a temporary directory
-    let temp_dir = tempdir::TempDir::new("vfs_example")?;
-    let mut fs = DirFS::new(temp_dir.path())?;
+**Key ideas**:
+- **Abstraction**: Work with different types of storage (real directories, memory cards, etc.) through a single API.
+- **Safety**: Operations are performed only within the VFS root directory; random access to the host file system is excluded.
+- **Testability**: Use in unit tests to simulate filesystems without side effects.
+- **Extensibility**: Create your own storages by adding new `FsBackend` implementations.
+- **Clarity**: Detailed error messages and up-to-date documentation.
 
-    // Make a directory
-    fs.mkdir("/docs")?;
+## How does this work?
 
-    // Write a file
-    fs.mkfile("/docs/note.txt", Some(b"Hello, VFS!"))?;
+Let me explain the logic of working with `DirFS` using a typical example.
 
-    // Check existence
-    assert!(fs.exists("/docs/note.txt"));
+Suppose your project requires creating a specific structure of real directories and files for testing purposes.
+Suppose your application is cross-platform, and therefore your tests and the directories and files they create should run 
+successfully on any OS (Linux, Windows, MacOS). Furthermore, after completing the tests, all created directories and files 
+should be deleted (optional) to avoid creating side effects on the host system. This should not affect the host's data.
+In this case, `DirFS` is what you need.
 
-    // Remove it
-    fs.rm("/docs/note.txt")?;
-    assert!(!fs.exists("/docs/note.txt"));
-    
-    // On drop, temp_dir is cleaned up automatically (if is_auto_clean=true)
-    Ok(())
-}
+### Creating a new isolated VFS
 ```
+let mut fs = DirFS::new("/absolute/path/to/vfs/root");
+```
+You can specify an existing or non-existent directory on the host system as the root of the new VFS.
+If the specified directory doesn't exist, it will be created.
+
+**Important**: When selecting the root directory, you must ensure that the VFS has sufficient access rights to create it and further work with it!
+
+#### Example 1:
+Let's say your host has a directory named `/home/user` with create, read, and write permissions.
+Then, running the command
+```
+let mut fs = DirFS::new("/home/user/tests/root");
+```
+This will create two new subdirectories: `tests` and `root`.
+The `/home/user/tests/root` directory will become the root of the created VFS.
+
+**Note**: Since `DirFS` deletes everything created within its "jurisdiction" when it terminates, 
+the `tests` and `root` directories will be deleted as expected. However, the '/home/user' directory will remain.
+
+In addition to the root, `DirFS` internally stores the current working directory (CWD) in relative form 
+(i.e., a short path relative to the root). Immediately after creating the `DirFS`, the CWD value is `/`.
+You can obtain the root and CWD values using:
+```
+fs.root()   // returns the absolute path to the root on the host system
+fs.cwd()    // returns the current working directory inside the VFS ("internal path")
+```
+
+You can explicitly change the current working directory within the VFS using the `cd()` command.
+
+#### Example 2:
+Let's say your host has a directory named `/home/user/work` with create, read, and write permissions,
+and it already contains three files: `file.01`, `file.02`, `file.03`.
+Then, running the command
+```
+let mut fs = DirFS::new("/home/user/work");
+```
+This will create a new VFS rooted in the `/home/user/work` directory. However, existing files in it will not be visible
+within the VFS. This is done to protect host data. However, you can explicitly add all (or just some) of them to the VFS's control
+using the following commands:
+```
+fs.add("/file.01")  // absolute path used
+fs.add("file.02")   // relative path used
+fs.add("/")         // will add all root contents (all files and subdirectories) under VFS control recursively
+```
+As the example shows, if you pass a directory as a parameter to the `add()` function, the VFS will manage all of its contents (recursively).
+Also, note that `add()` accepts the "internal VFS path" as the path, meaning a path relative to the VFS root.
+This is convenient, as such a path can be significantly shorter than the full path on the host system. 
+It can be written in either absolute or relative form. If the path is relative, the VFS automatically converts it 
+to absolute form by concatenating it with the current working directory, i.e.:
+```
+absolute_path = CWD + related_path
+```
+This rule of converting a relative path to an absolute one (inside VFS) works for almost all `DirFS` functions.
+
+**Note**: `DirFS` also allows to inverse of `add()` operation with `forget()`, to remove certain files/directories from its control 
+(without deleting them from the host system).
+
+### Creating nested files and directories within VFS
+
+#### Example 3:
+Let's say you have a directory `/home/user/work` on your host, and inside it there are already three files: `file.01`, `file.02`, `file.03`. (déjà vu...)
+
+Let's create a new VFS:
+```
+let mut fs = DirFS::new("/home/user/work");
+```
+Let's create some new files and directories inside the VFS:
+```
+fs.mkfile("new_file.01", None);             // will create a new empty file inside the VFS
+                                            // the path inside VFS will be: /new_file.01
+                                            // the path on the host system will be: /home/user/work/new_file.01
+                                            
+fs.mkdir("subdir")                          // will create the directory /subdir
+fs.cd("subdir")                             // now CWD = /subdir
+
+fs.mkfile("new_file.02", b"Hello world");   // will create a new file with the contents inside VFS
+                                            // the path inside VFS will be: /subdir/new_file.02
+                                            // the path on the host system will be: /home/user/work/subdir/new_file.02
+                                            
+fs.mkfile("/file.03", None)                  // ERROR: such a file already exists, although it is not visible in VFS
+
+fs.add("/file.02")                           // OK: add an existing file to VFS
+fs.add("/file.03")                           // OK: add an existing file to VFS
+
+fs.forget("/file.02")                        // remove the file from VFS control (but not from the disk!)
+
+// At the end of the scope, the 'fs' variable is destroyed, and the drop() function physically removes files 
+// and directories that are under VFS control from the host system's disk (if flag 'is_auto_clean' == true).
+// In this case, these are: new_file.01, /subdir/new_file.02, the /subdir directory, and file.03.
+```
+
+### What else can be done?
++ Check for the existence of a file or directory in the VFS using `exists()`
++ Read `read()`, overwrite `write()` and append `append()` files with content
++ Remove individual files or entire directories with `rm()`
++ Iterate over directory contents with `ls()` and recursively with `tree()`
++ Clean the VFS with `cleanup()`
 
 ## API Summary
 
@@ -92,6 +164,8 @@ fn main() -> anyhow::Result<()> {
   + `cwd()` — get current working directory
   + `cd(path)` — change directory
   + `exists(path)` — check if path exists
+  + `ls(path)` — returns an iterator over directory entries
+  + `tree(path)` — returns a recursive iterator over the directory tree starting from a given path
   + `mkdir(path)` — creates directory
   + `mkfile(path, content)` — creates file with optional content
   + `read(path)` — read all contents of a file
@@ -107,13 +181,6 @@ fn main() -> anyhow::Result<()> {
   + Supports auto‑cleanup of created parent directories.
   + Normalizes paths automatically.
   + Enforces absolute root path at construction.
-
-## Design Principles
-- **Minimalism:** Only essential VFS operations.
-- **Transparency:** Errors include context (e.g., which path failed).
-- **Zero‑cost abstraction:** No runtime overhead beyond what the backend needs.
-- **User‑first:** Clear docs, examples, and error messages.
-- **Test‑friendly:** Designed for use in unit and integration tests.
 
 ## Planned Features
 
