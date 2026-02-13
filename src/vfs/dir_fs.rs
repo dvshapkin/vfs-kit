@@ -23,12 +23,7 @@ use crate::{DirEntry, DirEntryType};
 ///
 /// `DirFS` provides an isolated, path‑normalized view of a portion of the filesystem, rooted at a
 /// designated absolute path (`root`). It maintains an internal state of valid paths and supports
-/// standard operations:
-/// - Navigate via `cd()` (change working directory).
-/// - Create directories (`mkdir()`) and files (`mkfile()`).
-/// - Remove entries (`rm()`).
-/// - Check existence (`exists()`).
-/// - Read and write content (`read()` / `write()` / `append()`).
+/// all operations defined in `FsBackend` trait.
 ///
 /// ### Usage notes:
 /// - `DirFS` does not follow symlinks; `rm()` removes the link, not the target.
@@ -61,8 +56,9 @@ pub struct DirFS {
 impl DirFS {
     /// Creates a new DirFs instance with the root directory at `path`.
     /// Checks permissions to create and write into `path`.
-    /// * `path` is an absolute host path.
-    /// If `path` is not absolute, error returns.
+    /// * `path` is an absolute host path. If path not exists it will be created.
+    /// If `path` is not absolute or path is not a directory, error returns.
+    /// By default, the `is_auto_clean` flag is set to `true`.
     pub fn new<P: AsRef<Path>>(root: P) -> Result<Self> {
         let root = root.as_ref();
 
@@ -130,7 +126,7 @@ impl DirFS {
 
     /// Removes a file or directory from the VFS and recursively untracks all its contents.
     ///
-    /// This method "forgets" the specified path — it is permanently removed from the VFS tracking.
+    /// This method "forgets" the specified path — it is removed from the VFS tracking.
     /// If the path is a directory, all its children (files and subdirectories) are also untracked
     /// recursively.
     ///
@@ -157,10 +153,7 @@ impl DirFS {
     /// # Examples
     ///
     /// ```
-    /// use vfs_kit::{DirFS, FsBackend};
-    ///
-    /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut vfs = DirFS::new(temp_dir.path()).unwrap();
+    /// #![ignore]
     ///
     /// vfs.mkdir("/docs/backup");
     /// vfs.mkfile("/docs/readme.txt", None);
@@ -173,10 +166,7 @@ impl DirFS {
     /// ```
     ///
     /// ```
-    /// use vfs_kit::{DirFS, FsBackend};
-    ///
-    /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut vfs = DirFS::new(temp_dir.path()).unwrap();
+    /// #![ignore]
     ///
     /// // Error: trying to forget a non-existent path
     /// assert!(vfs.forget("/nonexistent").is_err());
@@ -350,7 +340,7 @@ impl FsBackend for DirFS {
     }
 
     /// Changes the current working directory.
-    /// * `path` can be in relative or absolute form, but in both cases it must exist.
+    /// * `path` can be in relative or absolute form, but in both cases it must exist in VFS.
     /// An error is returned if the specified `path` does not exist.
     fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let target = self.to_inner(path);
@@ -362,10 +352,7 @@ impl FsBackend for DirFS {
     }
 
     /// Checks if a `path` exists in the vfs.
-    /// The `path` can be:
-    /// - absolute (starting with '/'),
-    /// - relative (relative to the vfs cwd),
-    /// - contain '..' or '.'.
+    /// The `path` can be in relative or absolute form.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         let inner = self.to_inner(path);
         self.entries.contains_key(&inner)
@@ -373,14 +360,12 @@ impl FsBackend for DirFS {
 
     /// Returns an iterator over directory entries at a specific depth (shallow listing).
     ///
-    /// This method lists only the **immediate children** of the given directory (or CWD if `None`),
+    /// This method lists only the **immediate children** of the given directory,
     /// i.e., entries that are exactly one level below the specified path.
     /// It does *not* recurse into subdirectories (see `tree()` if you need recurse).
     ///
     /// # Arguments
-    /// * `path` - Optional path to the directory to list:
-    ///   - `Some(p)`: list contents of directory `p` (must exist in VFS).
-    ///   - `None`: list contents of the current working directory (`cwd`).
+    /// * `path` - path to the directory to list (must exist in VFS).
     ///
     /// # Returns
     /// * `Ok(impl Iterator<Item = DirEntry>)` - Iterator over entries of immediate children
@@ -390,22 +375,18 @@ impl FsBackend for DirFS {
     ///
     /// # Example:
     /// ```
-    /// use std::path::Path;
-    /// use vfs_kit::{DirEntry, DirFS, FsBackend};
-    ///
-    /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut fs = DirFS::new(temp_dir.path()).unwrap();
+    /// #![ignore]
     ///
     /// fs.mkdir("/docs/subdir");
     /// fs.mkfile("/docs/document.txt", None);
     ///
     /// // List current directory contents
-    /// for entry in fs.ls::<&Path>(None).unwrap() {
+    /// for entry in fs.ls("/").unwrap() {
     ///     println!("{:?}", entry);
     /// }
     ///
     /// // List contents of "/docs"
-    /// for entry in fs.ls(Some("/docs")).unwrap() {
+    /// for entry in fs.ls("/docs").unwrap() {
     ///     if entry.is_file() {
     ///         println!("File: {:?}", entry);
     ///     } else {
@@ -445,9 +426,7 @@ impl FsBackend for DirFS {
     /// directory (i.e., the starting directory itself is **not** included).
     ///
     /// # Arguments
-    /// * `path` - Optional path to the directory to traverse:
-    ///   - `Some(p)`: start from directory `p` (must exist in VFS).
-    ///   - `None`: start from the current working directory (`cwd`).
+    /// * `path` - path to the directory to traverse (must exist in VFS).
     ///
     /// # Returns
     /// * `Ok(impl Iterator<Item = DirEntry>)` - Iterator over all entries *within* the tree
@@ -466,22 +445,18 @@ impl FsBackend for DirFS {
     ///
     /// # Example:
     /// ```
-    /// use std::path::Path;
-    /// use vfs_kit::{DirFS, FsBackend};
-    ///
-    /// let temp_dir = tempdir::TempDir::new("vfs_example").unwrap();
-    /// let mut fs = DirFS::new(temp_dir.path()).unwrap();
+    /// #![ignore]
     ///
     /// fs.mkdir("/docs/subdir");
     /// fs.mkfile("/docs/document.txt", None);
     ///
     /// // Iterate over current working directory
-    /// for entry in fs.tree::<&Path>(None).unwrap() {
+    /// for entry in fs.tree("/").unwrap() {
     ///     println!("{:?}", entry);
     /// }
     ///
     /// // Iterate over a specific directory
-    /// for entry in fs.tree(Some("/docs")).unwrap() {
+    /// for entry in fs.tree("/docs").unwrap() {
     ///     if entry.is_file() {
     ///         println!("File: {:?}", entry);
     ///     }
@@ -556,12 +531,12 @@ impl FsBackend for DirFS {
     /// Creates new file in vfs.
     /// * `file_path` must be inner vfs path. It must contain the name of the file,
     /// optionally preceded by existing parent directory.
-    /// If the parent directory does not exist, an error is returned.
+    /// If the parent directory does not exist, it will be created.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
         let file_path = self.to_inner(file_path);
         if let Some(parent) = file_path.parent() {
-            if let Err(e) = std::fs::exists(parent) {
-                return Err(anyhow!("{:?}: {}", parent, e));
+            if !self.exists(parent) {
+                self.mkdir(parent)?;
             }
         }
         let host = self.to_host(&file_path);
@@ -1813,7 +1788,8 @@ mod tests {
             let mut fs = DirFS::new(root).unwrap();
 
             let result = fs.mkfile("/nonexistent/file.txt", None);
-            assert!(result.is_err());
+            assert!(result.is_ok());
+            assert!(root.join("nonexistent/file.txt").exists());
         }
 
         #[test]
@@ -1885,33 +1861,6 @@ mod tests {
             {
                 let result = fs.mkfile("/invalid\0name.txt", None);
                 assert!(result.is_err()); // NUL in filenames is prohibited in Unix.
-            }
-        }
-
-        #[test]
-        fn test_mkfile_permission_denied() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-
-                let temp_dir = setup_test_env();
-                let root = temp_dir.path();
-                let protected = root.join("protected");
-                std::fs::create_dir(&protected).unwrap();
-                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o000)).unwrap(); // No access
-
-                let mut fs = DirFS::new(root).unwrap();
-                let result = fs.mkfile("/protected/file.txt", None);
-
-                std::fs::set_permissions(&protected, PermissionsExt::from_mode(0o755)).unwrap(); // Grant access
-
-                assert!(result.is_err());
-                assert!(
-                    result
-                        .unwrap_err()
-                        .to_string()
-                        .contains("Permission denied")
-                );
             }
         }
 

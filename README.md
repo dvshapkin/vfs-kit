@@ -30,8 +30,9 @@ cargo add vfs-kit
 ### Changed
 - This version is entirely dedicated to improving the documentation. I've decided to abandon the neural 
   network-generated text in favor of less formal, yet more informative and useful, documentation written by myself.
-- Also, the changes affected two functions:
-  `ls()` and `tree()` - they no longer work with an implicit path parameter.
+- Also, the changes affected three functions:
+  + `mkfile()` - if the parent directory not exists, it will be created.
+  + `ls()` and `tree()` - they no longer work with an implicit path parameter.
 
 ## Overview
 
