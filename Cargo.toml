@@ -1,6 +1,6 @@
 [package]
 name = "vfs-kit"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 
 authors = ["dvshapkin <dvshapkin@mail.ru>"]
@@ -14,9 +14,6 @@ repository = "https://github.com/dvshapkin/vfs-kit"
 
 keywords = ["vfs", "virtual-file-system", "dir-fs", "map-fs"]
 categories = ["filesystem", "development-tools"]
-
-#[lib]
-#doctest = false
 
 [dependencies]
 anyhow = "1.0"

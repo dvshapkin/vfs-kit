@@ -336,19 +336,6 @@ impl DirFS {
 
         Ok(())
     }
-
-    fn inner_or_cwd<P: AsRef<Path>>(&self, path: Option<P>) -> Result<PathBuf> {
-        Ok(match path {
-            Some(p) => {
-                let inner = self.to_inner(&p);
-                if !self.exists(&inner) {
-                    return Err(anyhow!("{} does not exist", p.as_ref().display()));
-                }
-                inner
-            }
-            None => self.cwd().to_path_buf(),
-        })
-    }
 }
 
 impl FsBackend for DirFS {
@@ -435,8 +422,11 @@ impl FsBackend for DirFS {
     /// - **Error handling:** If `path` does not exist, an error is returned before iteration.
     /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
     ///   during iteration.
-    fn ls<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = DirEntry>> {
-        let inner_path = self.inner_or_cwd(path)?;
+    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = DirEntry>> {
+        let inner_path = self.to_inner(path);
+        if !self.exists(&inner_path) {
+            return Err(anyhow!("{} does not exist", inner_path.display()));
+        }
         let component_count = inner_path.components().count() + 1;
         Ok(self
             .entries
@@ -503,13 +493,18 @@ impl FsBackend for DirFS {
     ///   as `self` is alive.
     /// - Symbolic links are treated as regular entries (no follow/resolve).
     /// - Use `Path` methods (e.g., `is_file()`, `is_dir()`) on yielded items for type checks.
-    fn tree<P: AsRef<Path>>(&self, path: Option<P>) -> Result<impl Iterator<Item = DirEntry>> {
-        let path = self.inner_or_cwd(path)?;
+    fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = DirEntry>> {
+        let inner_path = self.to_inner(path);
+        if !self.exists(&inner_path) {
+            return Err(anyhow!("{} does not exist", inner_path.display()));
+        }
         Ok(self
             .entries
             .iter()
             .map(|(_, entry)| entry.clone())
-            .filter(move |entry| entry.path().starts_with(&path) && entry.path() != path))
+            .filter(move |entry| {
+                entry.path().starts_with(&inner_path) && entry.path() != inner_path
+            }))
     }
 
     /// Creates directory and all it parents (if needed).
@@ -1057,7 +1052,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let entries: Vec<_> = fs.ls::<&Path>(None)?.collect();
+            let entries: Vec<_> = fs.ls(fs.cwd())?.collect();
             assert!(entries.is_empty(), "CWD should have no entries");
 
             Ok(())
@@ -1070,7 +1065,7 @@ mod tests {
 
             fs.mkfile("/file.txt", Some(b"Hello"))?;
 
-            let entries: Vec<_> = fs.ls::<&Path>(None)?.collect();
+            let entries: Vec<_> = fs.ls(fs.cwd())?.collect();
             assert_eq!(entries.len(), 1, "Should return exactly one file");
             assert_eq!(
                 entries[0].path(),
@@ -1090,7 +1085,7 @@ mod tests {
             fs.mkfile("/docs/readme.txt", None)?;
             fs.mkfile("/docs/todo.txt", None)?;
 
-            let entries: Vec<_> = fs.ls(Some("/docs"))?.collect();
+            let entries: Vec<_> = fs.ls("/docs")?.collect();
 
             assert_eq!(entries.len(), 2, "Should list both files in directory");
             assert!(entries.contains(&DirEntry::new("/docs/readme.txt", DirEntryType::File)));
@@ -1108,7 +1103,7 @@ mod tests {
             fs.mkfile("/project/main.rs", None)?;
             fs.mkfile("/project/src/lib.rs", None)?; // nested - should be excluded
 
-            let entries: Vec<_> = fs.ls(Some("/project"))?.collect();
+            let entries: Vec<_> = fs.ls("/project")?.collect();
 
             assert_eq!(entries.len(), 2, "Only immediate children should be listed");
             assert!(entries.contains(&DirEntry::new("/project/main.rs", DirEntryType::File)));
@@ -1132,7 +1127,7 @@ mod tests {
             fs.mkdir("/mix/subdir")?; // subdirectory - should be included
             fs.mkfile("/mix/subdir/deep.txt", None)?; // deeper - should be excluded
 
-            let entries: Vec<_> = fs.ls(Some("/mix"))?.collect();
+            let entries: Vec<_> = fs.ls("/mix")?.collect();
 
             assert_eq!(
                 entries.len(),
@@ -1156,8 +1151,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let result: Result<Vec<_>> = fs
-                .tree(Some("/nonexistent/path"))
+            let result: Result<Vec<_>> = fs.ls("/nonexistent/path")
                 .map(|iter| iter.collect());
 
             assert!(result.is_err(), "Should return error for nonexistent path");
@@ -1181,7 +1175,7 @@ mod tests {
             fs.mkfile("note.txt", None)?;
 
             // List contents of relative path "sub"
-            let sub_entries: Vec<_> = fs.ls(Some("sub"))?.collect();
+            let sub_entries: Vec<_> = fs.ls("sub")?.collect();
             assert_eq!(
                 sub_entries.len(),
                 1,
@@ -1189,7 +1183,7 @@ mod tests {
             );
 
             // List current directory (base)
-            let base_entries: Vec<_> = fs.ls(Some("."))?.collect();
+            let base_entries: Vec<_> = fs.ls(".")?.collect();
             assert_eq!(
                 base_entries.len(),
                 2,
@@ -1211,7 +1205,7 @@ mod tests {
             fs.mkdir("/проект/подпапка")?;
             fs.mkfile("/проект/подпапка/файл.txt", Some(b"Nested"))?; // should be excluded
 
-            let entries: Vec<_> = fs.ls(Some("/проект"))?.collect();
+            let entries: Vec<_> = fs.ls("/проект")?.collect();
 
             assert_eq!(
                 entries.len(),
@@ -1239,7 +1233,7 @@ mod tests {
             fs.mkdir("/sub")?;
             fs.mkfile("/sub/inner.txt", None)?; // should be excluded (nested)
 
-            let entries: Vec<_> = fs.ls(Some("/"))?.collect();
+            let entries: Vec<_> = fs.ls("/")?.collect();
 
             assert_eq!(
                 entries.len(),
@@ -1265,7 +1259,7 @@ mod tests {
 
             fs.mkdir("/empty")?;
 
-            let entries: Vec<_> = fs.ls(Some("/empty"))?.collect();
+            let entries: Vec<_> = fs.ls("/empty")?.collect();
             assert!(
                 entries.is_empty(),
                 "Empty directory should return no entries"
@@ -1283,7 +1277,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
+            let entries: Vec<_> = fs.tree(fs.cwd())?.collect();
             assert!(entries.is_empty());
 
             Ok(())
@@ -1296,7 +1290,7 @@ mod tests {
 
             fs.mkdir("/empty_dir")?;
 
-            let entries: Vec<_> = fs.tree(Some("/empty_dir"))?.collect();
+            let entries: Vec<_> = fs.tree("/empty_dir")?.collect();
             assert!(entries.is_empty());
 
             Ok(())
@@ -1309,7 +1303,7 @@ mod tests {
 
             fs.mkfile("/file.txt", Some(b"Content"))?;
 
-            let entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
+            let entries: Vec<_> = fs.tree(fs.cwd())?.collect();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0], DirEntry::new("/file.txt", DirEntryType::File));
 
@@ -1324,7 +1318,7 @@ mod tests {
             fs.mkdir("/docs")?;
             fs.mkfile("/docs/readme.txt", Some(b"Docs"))?;
 
-            let entries: Vec<_> = fs.tree(Some("/docs"))?.collect();
+            let entries: Vec<_> = fs.tree("/docs")?.collect();
             assert_eq!(entries.len(), 1);
             assert_eq!(
                 entries[0],
@@ -1348,11 +1342,11 @@ mod tests {
             fs.mkfile("/project/tests/test.rs", Some(b"#[test] fn it_works() {}"))?;
 
             // Test tree from root
-            let root_entries: Vec<_> = fs.tree::<&Path>(None)?.collect();
+            let root_entries: Vec<_> = fs.tree("/")?.collect();
             assert_eq!(root_entries.len(), 6); // /project, /project/src, /project/tests, /project/main.rs, /project/src/lib.rs, /project/tests/test.rs
 
             // Test tree from /project
-            let project_entries: Vec<_> = fs.tree(Some("/project"))?.collect();
+            let project_entries: Vec<_> = fs.tree("/project")?.collect();
             assert_eq!(project_entries.len(), 5); // /project/src, /project/tests, /project/main.rs, /project/src/lib.rs, /project/tests/test.rs
 
             Ok(())
@@ -1363,7 +1357,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let result: Result<Vec<_>> = fs.tree(Some("/nonexistent")).map(|iter| iter.collect());
+            let result: Result<Vec<_>> = fs.tree("/nonexistent").map(|iter| iter.collect());
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("does not exist"));
 
@@ -1380,7 +1374,7 @@ mod tests {
             fs.mkdir("sub")?;
             fs.mkfile("sub/file.txt", Some(b"Relative"))?;
 
-            let entries: Vec<_> = fs.tree(Some("sub"))?.collect();
+            let entries: Vec<_> = fs.tree("sub")?.collect();
             assert_eq!(entries.len(), 1);
             assert_eq!(
                 entries[0],
@@ -1400,7 +1394,7 @@ mod tests {
             fs.mkdir("/проект/подпапка")?;
             fs.mkfile("/проект/подпапка/файл.txt", Some(b"Nested unicode"))?;
 
-            let entries: Vec<_> = fs.tree(Some("/проект"))?.collect();
+            let entries: Vec<_> = fs.tree("/проект")?.collect();
 
             assert_eq!(entries.len(), 3);
             assert!(entries.contains(&DirEntry::new("/проект/документ.txt", DirEntryType::File)));
@@ -1421,7 +1415,7 @@ mod tests {
             fs.mkdir("/parent")?;
             fs.mkfile("/parent/child.txt", Some(b"Child"))?;
 
-            let entries: Vec<_> = fs.tree(Some("/parent"))?.collect();
+            let entries: Vec<_> = fs.tree("/parent")?.collect();
 
             // Should not include /parent itself, only its contents
             assert!(
@@ -1448,7 +1442,7 @@ mod tests {
             fs.mkfile("/order_test/b.txt", None)?;
             fs.mkfile("/order_test/c.txt", None)?;
 
-            let entries: Vec<_> = fs.tree(Some("/order_test"))?.collect();
+            let entries: Vec<_> = fs.tree("/order_test")?.collect();
 
             assert_eq!(entries.len(), 3);
 
