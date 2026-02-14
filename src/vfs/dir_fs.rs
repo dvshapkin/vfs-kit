@@ -10,10 +10,10 @@
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
+use anyhow::anyhow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use anyhow::anyhow;
 
 use crate::core::{FsBackend, Result};
 use crate::{DirEntry, DirEntryType};
@@ -356,19 +356,21 @@ impl FsBackend for DirFS {
     /// Checks if `path` is a directory.
     fn is_dir<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
         let path = path.as_ref();
-        if !self.exists(&path) {
+        let inner = self.to_inner(path);
+        if !self.exists(&inner) {
             return Err(anyhow!("{} does not exist", path.display()));
         }
-        Ok(self.entries[path].is_dir())
+        Ok(self.entries[&inner].is_dir())
     }
 
     /// Checks if `path` is a regular file.
     fn is_file<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
         let path = path.as_ref();
-        if !self.exists(&path) {
+        let inner = self.to_inner(path);
+        if !self.exists(&inner) {
             return Err(anyhow!("{} does not exist", path.display()));
         }
-        Ok(self.entries[path].is_file())
+        Ok(self.entries[&inner].is_file())
     }
 
     /// Returns an iterator over directory entries at a specific depth (shallow listing).
@@ -1037,6 +1039,157 @@ mod tests {
             assert!(fs.exists("./"));
             assert!(fs.exists("/projects"));
         }
+
+        #[test]
+        fn test_exists_empty_path() {
+            let temp_dir = setup_test_env();
+            let fs = DirFS::new(&temp_dir).unwrap();
+            assert!(fs.exists(""));
+        }
+    }
+
+    mod is_dir_file {
+        use super::*;
+
+        #[test]
+        fn test_is_dir_existing_directory() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkdir("/docs")?;
+
+            let result = vfs.is_dir("/docs")?;
+            assert!(result, "Expected /docs to be a directory");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_nonexistent_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let vfs = DirFS::new(temp_dir.path())?;
+
+            let result = vfs.is_dir("/nonexistent");
+            assert!(result.is_err(), "Expected error for nonexistent path");
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error should mention path does not exist"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_file_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkfile("/file.txt", Some(b"Content"))?;
+
+            let result = vfs.is_dir("/file.txt")?;
+            assert!(!result, "Expected /file.txt not to be a directory");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_existing_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkfile("/report.pdf", Some(b"PDF Content"))?;
+
+            let result = vfs.is_file("/report.pdf")?;
+            assert!(result, "Expected /report.pdf to be a file");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_nonexistent_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let vfs = DirFS::new(temp_dir.path())?;
+
+            let result = vfs.is_file("/missing.txt");
+            assert!(result.is_err(), "Expected error for nonexistent file");
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error should indicate path does not exist"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_directory_path() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkdir("/src")?;
+            let result = vfs.is_file("/src")?;
+            assert!(!result, "Expected /src not to be a regular file");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_and_is_file_on_same_file() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkfile("/data.json", Some(b"{}"))?;
+
+            // File should not be a directory
+            assert!(!vfs.is_dir("/data.json")?);
+            // But should be a file
+            assert!(vfs.is_file("/data.json")?);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_and_is_file_on_same_dir() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkdir("/assets")?;
+
+            // Directory should be a directory
+            assert!(vfs.is_dir("/assets")?);
+            // But not a regular file
+            assert!(!vfs.is_file("/assets")?);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_relative_paths_resolution() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(temp_dir.path())?;
+
+            vfs.mkdir("/base")?;
+            vfs.cd("/base")?;
+            vfs.mkdir("sub")?;
+            vfs.mkfile("file.txt", None)?;
+
+            // Test relative directory
+            assert!(vfs.is_dir("sub")?);
+            // Test relative file
+            assert!(vfs.is_file("file.txt")?);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_root_directory_checks() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let vfs = DirFS::new(temp_dir.path())?;
+
+            assert!(vfs.is_dir("/")?, "Root '/' should be a directory");
+            assert!(!vfs.is_file("/")?, "Root should not be a regular file");
+
+            Ok(())
+        }
     }
 
     mod ls {
@@ -1146,8 +1299,7 @@ mod tests {
             let temp_dir = setup_test_env();
             let fs = DirFS::new(temp_dir.path())?;
 
-            let result: Result<Vec<_>> = fs.ls("/nonexistent/path")
-                .map(|iter| iter.collect());
+            let result: Result<Vec<_>> = fs.ls("/nonexistent/path").map(|iter| iter.collect());
 
             assert!(result.is_err(), "Should return error for nonexistent path");
             assert!(

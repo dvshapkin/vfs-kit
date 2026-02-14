@@ -162,6 +162,8 @@ fs.forget("/file.02")                        // remove the file from VFS control
   + `cwd()` — get current working directory
   + `cd(path)` — change directory
   + `exists(path)` — check if path exists
+  + `is_dir(path)` — check if path is a directory
+  + `is_file(path)` — check if path is a regular file
   + `ls(path)` — returns an iterator over directory entries
   + `tree(path)` — returns a recursive iterator over the directory tree starting from a given path
   + `mkdir(path)` — creates directory
