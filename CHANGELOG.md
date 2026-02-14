@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.14] - 2026-02-14
 
 ### Added
+- new method `FsBackend::to_host()`
 - new method `FsBackend::is_dir()`
 - new method `FsBackend::is_file()`
 

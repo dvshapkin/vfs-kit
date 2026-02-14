@@ -28,6 +28,7 @@ cargo add vfs-kit
 ## What's new in last version?
 ### [0.1.14]
 ### Added
+- new method `FsBackend::to_host()`
 - new method `FsBackend::is_dir()`
 - new method `FsBackend::is_file()`
 
@@ -160,6 +161,7 @@ fs.forget("/file.02")                        // remove the file from VFS control
 * `FsBackend`: Defines the VFS interface:
   + `root()` — get the root path
   + `cwd()` — get current working directory
+  + `to_host()` — returns the path on the host system that matches the specified internal path
   + `cd(path)` — change directory
   + `exists(path)` — check if path exists
   + `is_dir(path)` — check if path is a directory

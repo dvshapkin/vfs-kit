@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use crate::core::{FsBackend, Result};
+use crate::core::{utils, FsBackend, Result};
 use crate::{DirEntry, DirEntryType};
 
 /// A virtual filesystem (VFS) implementation that maps to a real directory on the host system.
@@ -71,7 +71,7 @@ impl DirFS {
             return Err(anyhow!("{:?} is not a directory", root));
         }
 
-        let root = Self::normalize(root);
+        let root = utils::normalize(root);
 
         let mut created_root_parents = Vec::new();
         if !std::fs::exists(&root)? {
@@ -113,7 +113,7 @@ impl DirFS {
     /// * `path` is an inner VFS path.
     pub fn add<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let inner = self.to_inner(&path);
-        let host = self.to_host(&inner);
+        let host = self.to_host(&inner)?;
         if !host.exists() {
             return Err(anyhow!(
                 "No such file or directory: {}",
@@ -181,7 +181,7 @@ impl DirFS {
         if !self.exists(&inner) {
             return Err(anyhow!("{:?} path is not tracked by VFS", path.as_ref()));
         }
-        if Self::is_inner_root(&inner) {
+        if utils::is_virtual_root(&inner) {
             return Err(anyhow!("cannot forget root directory"));
         }
 
@@ -204,40 +204,8 @@ impl DirFS {
         Ok(())
     }
 
-    /// Normalizes an arbitrary `path` by processing all occurrences
-    /// of '.' and '..' elements. Also, removes final `/`.
-    fn normalize<P: AsRef<Path>>(path: P) -> PathBuf {
-        let mut result = PathBuf::new();
-        for component in path.as_ref().components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    result.pop();
-                }
-                _ => {
-                    result.push(component);
-                }
-            }
-        }
-        // remove final /
-        if result != PathBuf::from("/") && result.ends_with("/") {
-            result.pop();
-        }
-        result
-    }
-
-    fn to_host<P: AsRef<Path>>(&self, inner_path: P) -> PathBuf {
-        let inner = self.to_inner(inner_path);
-        self.root.join(inner.strip_prefix("/").unwrap())
-    }
-
     fn to_inner<P: AsRef<Path>>(&self, inner_path: P) -> PathBuf {
-        Self::normalize(self.cwd.join(inner_path))
-    }
-
-    fn is_inner_root<P: AsRef<Path>>(path: P) -> bool {
-        let components: Vec<_> = path.as_ref().components().collect();
-        components.len() == 1 && components[0] == Component::RootDir
+        utils::normalize(self.cwd.join(inner_path))
     }
 
     /// Make directories recursively.
@@ -275,16 +243,6 @@ impl DirFS {
         }
 
         Ok(created)
-    }
-
-    fn rm_host_artifact<P: AsRef<Path>>(host_path: P) -> Result<()> {
-        let host_path = host_path.as_ref();
-        if host_path.is_dir() {
-            std::fs::remove_dir_all(host_path)?
-        } else {
-            std::fs::remove_file(host_path)?
-        }
-        Ok(())
     }
 
     fn check_permissions<P: AsRef<Path>>(path: P) -> bool {
@@ -332,6 +290,13 @@ impl FsBackend for DirFS {
     /// Returns current working directory related to the vfs root.
     fn cwd(&self) -> &Path {
         self.cwd.as_path()
+    }
+
+    /// Returns the path on the host system that matches the specified internal path.
+    /// * `inner_path` must exist in VFS
+    fn to_host<P: AsRef<Path>>(&self, inner_path: P) -> Result<PathBuf> {
+        let inner = self.to_inner(inner_path);
+        Ok(self.root.join(inner.strip_prefix("/").unwrap()))
     }
 
     /// Changes the current working directory.
@@ -527,7 +492,7 @@ impl FsBackend for DirFS {
         for component in need_to_create {
             built.push(component);
             if !self.exists(&built) {
-                let host = self.to_host(&built);
+                let host = self.to_host(&built)?;
                 std::fs::create_dir(&host)?;
                 self.entries.insert(
                     built.clone(),
@@ -550,7 +515,7 @@ impl FsBackend for DirFS {
                 self.mkdir(parent)?;
             }
         }
-        let host = self.to_host(&file_path);
+        let host = self.to_host(&file_path)?;
         let mut fd = std::fs::File::create(host)?;
         self.entries.insert(
             file_path.clone(),
@@ -588,7 +553,7 @@ impl FsBackend for DirFS {
         }
 
         let mut content = Vec::new();
-        let host = self.to_host(&inner);
+        let host = self.to_host(&inner)?;
         std::fs::File::open(&host)?.read_to_end(&mut content)?;
 
         Ok(content)
@@ -622,7 +587,7 @@ impl FsBackend for DirFS {
             }
         }
 
-        let host = self.to_host(&inner);
+        let host = self.to_host(&inner)?;
         std::fs::write(&host, content)?;
 
         Ok(())
@@ -660,7 +625,7 @@ impl FsBackend for DirFS {
 
         // Open file in append mode and write content
         use std::fs::OpenOptions;
-        let host = self.to_host(&inner);
+        let host = self.to_host(&inner)?;
         let mut file = OpenOptions::new().write(true).append(true).open(&host)?;
 
         file.write_all(content)?;
@@ -683,12 +648,12 @@ impl FsBackend for DirFS {
         if path.as_ref().as_os_str().is_empty() {
             return Err(anyhow!("invalid path: empty"));
         }
-        if Self::is_inner_root(&path) {
+        if utils::is_virtual_root(&path) {
             return Err(anyhow!("invalid path: the root cannot be removed"));
         }
 
         let inner_path = self.to_inner(path); // Convert to VFS-internal normalized path
-        let host_path = self.to_host(&inner_path); // Map to real filesystem path
+        let host_path = self.to_host(&inner_path)?; // Map to real filesystem path
 
         // Check if the path exists in the virtual filesystem
         if !self.exists(&inner_path) {
@@ -697,18 +662,8 @@ impl FsBackend for DirFS {
 
         // Remove from the real filesystem
         if std::fs::exists(&host_path)? {
-            Self::rm_host_artifact(&host_path)?;
+            utils::rm_on_host(&host_path)?;
         }
-        // if let Err(e) = Self::rm_host_artifact(host_path) {
-        //     // TODO: needs more exact error checking
-        //     if e.to_string().contains("No such file or directory") {
-        //         // on Unix
-        //     } else if e.to_string().contains("Unable to remove") {
-        //         // on Windows
-        //     } else {
-        //         return Err(e);
-        //     }
-        // }
 
         // Update internal state: collect all entries that start with `inner_path`
         let removed: Vec<PathBuf> = self
@@ -740,13 +695,14 @@ impl FsBackend for DirFS {
         }
 
         for entry in sorted_paths_to_remove.iter().rev() {
-            let host = self.to_host(entry);
-            let result = Self::rm_host_artifact(&host);
-            if result.is_ok() {
-                self.entries.remove(entry);
-            } else {
-                is_ok = false;
-                eprintln!("Unable to remove: {}", host.display());
+            if let Ok(host) = self.to_host(entry) {
+                let result = utils::rm_on_host(&host);
+                if result.is_ok() {
+                    self.entries.remove(entry);
+                } else {
+                    is_ok = false;
+                    eprintln!("Unable to remove: {}", host.display());
+                }
             }
         }
 
@@ -768,7 +724,7 @@ impl Drop for DirFS {
             .created_root_parents
             .iter()
             .rev()
-            .filter_map(|p| Self::rm_host_artifact(p).err())
+            .filter_map(|p| utils::rm_on_host(p).err())
             .collect();
         if !errors.is_empty() {
             eprintln!("Failed to remove parents: {:?}", errors);
@@ -850,7 +806,7 @@ mod tests {
             let messy_path = temp_dir.path().join("././subdir/../subdir");
 
             let fs = DirFS::new(&messy_path).unwrap();
-            let canonical = DirFS::normalize(temp_dir.path().join("subdir"));
+            let canonical = utils::normalize(temp_dir.path().join("subdir"));
 
             assert_eq!(fs.root, canonical);
         }
@@ -911,15 +867,15 @@ mod tests {
 
         #[test]
         fn test_normalize_path() {
-            assert_eq!(DirFS::normalize("/a/b/c/"), PathBuf::from("/a/b/c"));
-            assert_eq!(DirFS::normalize("/a/b/./c"), PathBuf::from("/a/b/c"));
-            assert_eq!(DirFS::normalize("/a/b/../c"), PathBuf::from("/a/c"));
-            assert_eq!(DirFS::normalize("/"), PathBuf::from("/"));
-            assert_eq!(DirFS::normalize("/.."), PathBuf::from("/"));
-            assert_eq!(DirFS::normalize(".."), PathBuf::from(""));
-            assert_eq!(DirFS::normalize(""), PathBuf::from(""));
-            assert_eq!(DirFS::normalize("../a"), PathBuf::from("a"));
-            assert_eq!(DirFS::normalize("./a"), PathBuf::from("a"));
+            assert_eq!(utils::normalize("/a/b/c/"), PathBuf::from("/a/b/c"));
+            assert_eq!(utils::normalize("/a/b/./c"), PathBuf::from("/a/b/c"));
+            assert_eq!(utils::normalize("/a/b/../c"), PathBuf::from("/a/c"));
+            assert_eq!(utils::normalize("/"), PathBuf::from("/"));
+            assert_eq!(utils::normalize("/.."), PathBuf::from("/"));
+            assert_eq!(utils::normalize(".."), PathBuf::from(""));
+            assert_eq!(utils::normalize(""), PathBuf::from(""));
+            assert_eq!(utils::normalize("../a"), PathBuf::from("a"));
+            assert_eq!(utils::normalize("./a"), PathBuf::from("a"));
         }
     }
 

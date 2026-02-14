@@ -10,11 +10,12 @@ pub enum DirEntryType {
 pub struct DirEntry {
     path: PathBuf,
     kind: DirEntryType,
+    content: Option<Vec<u8>>,
 }
 
 impl DirEntry {
     pub fn new<P: AsRef<Path>>(path: P, kind: DirEntryType) -> DirEntry {
-        DirEntry { path: path.as_ref().to_path_buf(), kind }
+        DirEntry { path: path.as_ref().to_path_buf(), kind, content: None }
     }
     
     pub fn path(&self) -> &Path {

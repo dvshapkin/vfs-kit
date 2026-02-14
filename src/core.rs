@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use anyhow;
 use crate::DirEntry;
 
 /// FsBackend defines a common API for all virtual file systems (vfs) in the crate.
@@ -11,6 +12,10 @@ pub trait FsBackend {
 
     /// Returns current working directory related to the vfs root.
     fn cwd(&self) -> &Path;
+
+    /// Returns the path on the host system that matches the specified internal path.
+    /// * `inner_path` must exist in VFS
+    fn to_host<P: AsRef<Path>>(&self, inner_path: P) -> Result<PathBuf>;
 
     /// Changes the current working directory.
     /// `path` can be in relative or absolute form, but in both cases it must exist in vfs.
@@ -37,7 +42,7 @@ pub trait FsBackend {
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
 
     /// Creates new file in vfs.
-    fn mkfile<P: AsRef<Path>>(&mut self, name: P, content: Option<&[u8]>) -> Result<()>;
+    fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()>;
     
     /// Reads the entire contents of a file into a byte vector.
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>>;
@@ -56,3 +61,47 @@ pub trait FsBackend {
 }
 
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
+
+pub mod utils {
+    use std::path::{Component, Path, PathBuf};
+    use super::Result;
+    
+    /// Normalizes an arbitrary `path` by processing all occurrences
+    /// of '.' and '..' elements. Also, removes final `/`.
+    pub fn normalize<P: AsRef<Path>>(path: P) -> PathBuf {
+        let mut result = PathBuf::new();
+        for component in path.as_ref().components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    result.pop();
+                }
+                _ => {
+                    result.push(component);
+                }
+            }
+        }
+        // remove final /
+        if result != PathBuf::from("/") && result.ends_with("/") {
+            result.pop();
+        }
+        result
+    }
+
+    /// Checks that the path consists only of the root component `/`.
+    pub fn is_virtual_root<P: AsRef<Path>>(path: P) -> bool {
+        let components: Vec<_> = path.as_ref().components().collect();
+        components.len() == 1 && components[0] == Component::RootDir
+    }
+
+    /// Removes file or directory (recursively) on host.
+    pub fn rm_on_host<P: AsRef<Path>>(host_path: P) -> Result<()> {
+        let host_path = host_path.as_ref();
+        if host_path.is_dir() {
+            std::fs::remove_dir_all(host_path)?
+        } else {
+            std::fs::remove_file(host_path)?
+        }
+        Ok(())
+    }
+}
