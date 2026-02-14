@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use crate::core::{utils, FsBackend, Result};
-use crate::{DirEntry, DirEntryType};
+use crate::core::{FsBackend, Result, utils};
+use crate::{Entry, EntryType};
 
 /// A virtual filesystem (VFS) implementation that maps to a real directory on the host system.
 ///
@@ -45,10 +45,10 @@ use crate::{DirEntry, DirEntryType};
 /// fs.rm("/docs/note.txt").unwrap();
 /// ```
 pub struct DirFS {
-    root: PathBuf,                        // host-related absolute normalized path
-    cwd: PathBuf,                         // inner absolute normalized path
-    entries: BTreeMap<PathBuf, DirEntry>, // inner absolute normalized paths
-    created_root_parents: Vec<PathBuf>,   // host-related absolute normalized paths
+    root: PathBuf,                      // host-related absolute normalized path
+    cwd: PathBuf,                       // inner absolute normalized path
+    entries: BTreeMap<PathBuf, Entry>,  // inner absolute normalized paths
+    created_root_parents: Vec<PathBuf>, // host-related absolute normalized paths
     is_auto_clean: bool,
 }
 
@@ -87,7 +87,7 @@ impl DirFS {
         let mut entries = BTreeMap::new();
         entries.insert(
             inner_root.clone(),
-            DirEntry::new(&inner_root, DirEntryType::Directory),
+            Entry::new(&inner_root, EntryType::Directory),
         );
 
         Ok(Self {
@@ -260,11 +260,11 @@ impl DirFS {
     /// Recursively adds a directory and all its entries to the VFS.
     fn add_recursive(&mut self, inner_path: &Path, host_path: &Path) -> Result<()> {
         let entry_type = if host_path.is_dir() {
-            DirEntryType::Directory
+            EntryType::Directory
         } else {
-            DirEntryType::File
+            EntryType::File
         };
-        let entry = DirEntry::new(inner_path, entry_type);
+        let entry = Entry::new(inner_path, entry_type);
         self.entries.insert(inner_path.to_path_buf(), entry);
 
         if host_path.is_dir() {
@@ -381,7 +381,7 @@ impl FsBackend for DirFS {
     /// - **Error handling:** If `path` does not exist, an error is returned before iteration.
     /// - **Performance:** The filtering is done in‑memory; no additional filesystem I/O occurs
     ///   during iteration.
-    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = DirEntry>> {
+    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>> {
         let inner_path = self.to_inner(path);
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
@@ -390,11 +390,11 @@ impl FsBackend for DirFS {
         Ok(self
             .entries
             .iter()
-            .map(|(_, entry)| entry.clone())
-            .filter(move |entry| {
-                entry.path().starts_with(&inner_path)
-                    && entry.path() != inner_path
-                    && entry.path().components().count() == component_count
+            .map(|(pb, _)| pb.as_path())
+            .filter(move |&path| {
+                path.starts_with(&inner_path)
+                    && path != inner_path
+                    && path.components().count() == component_count
             }))
     }
 
@@ -444,7 +444,7 @@ impl FsBackend for DirFS {
     ///   as `self` is alive.
     /// - Symbolic links are treated as regular entries (no follow/resolve).
     /// - Use `Path` methods (e.g., `is_file()`, `is_dir()`) on yielded items for type checks.
-    fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = DirEntry>> {
+    fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>> {
         let inner_path = self.to_inner(path);
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
@@ -452,9 +452,9 @@ impl FsBackend for DirFS {
         Ok(self
             .entries
             .iter()
-            .map(|(_, entry)| entry.clone())
-            .filter(move |entry| {
-                entry.path().starts_with(&inner_path) && entry.path() != inner_path
+            .map(|(pb, _)| pb.as_path())
+            .filter(move |&path| {
+                path.starts_with(&inner_path) && path != inner_path
             }))
     }
 
@@ -494,10 +494,8 @@ impl FsBackend for DirFS {
             if !self.exists(&built) {
                 let host = self.to_host(&built)?;
                 std::fs::create_dir(&host)?;
-                self.entries.insert(
-                    built.clone(),
-                    DirEntry::new(&built, DirEntryType::Directory),
-                );
+                self.entries
+                    .insert(built.clone(), Entry::new(&built, EntryType::Directory));
             }
         }
 
@@ -517,10 +515,8 @@ impl FsBackend for DirFS {
         }
         let host = self.to_host(&file_path)?;
         let mut fd = std::fs::File::create(host)?;
-        self.entries.insert(
-            file_path.clone(),
-            DirEntry::new(&file_path, DirEntryType::File),
-        );
+        self.entries
+            .insert(file_path.clone(), Entry::new(&file_path, EntryType::File));
         if let Some(content) = content {
             fd.write_all(content)?;
         }
@@ -688,9 +684,9 @@ impl FsBackend for DirFS {
 
         // Collect all paths to delete (except the root "/")
         let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
-        for (path, entry) in &self.entries {
-            if !entry.is_root() {
-                sorted_paths_to_remove.insert(path.clone());
+        for (pb, _) in &self.entries {
+            if pb != "/" {
+                sorted_paths_to_remove.insert(pb.clone());
             }
         }
 
@@ -1172,7 +1168,7 @@ mod tests {
             let entries: Vec<_> = fs.ls(fs.cwd())?.collect();
             assert_eq!(entries.len(), 1, "Should return exactly one file");
             assert_eq!(
-                entries[0].path(),
+                entries[0],
                 Path::new("/file.txt"),
                 "File path should match"
             );
@@ -1192,8 +1188,8 @@ mod tests {
             let entries: Vec<_> = fs.ls("/docs")?.collect();
 
             assert_eq!(entries.len(), 2, "Should list both files in directory");
-            assert!(entries.contains(&DirEntry::new("/docs/readme.txt", DirEntryType::File)));
-            assert!(entries.contains(&DirEntry::new("/docs/todo.txt", DirEntryType::File)));
+            assert!(entries.contains(&PathBuf::from("/docs/readme.txt").as_path()));
+            assert!(entries.contains(&PathBuf::from("/docs/todo.txt").as_path()));
 
             Ok(())
         }
@@ -1210,11 +1206,11 @@ mod tests {
             let entries: Vec<_> = fs.ls("/project")?.collect();
 
             assert_eq!(entries.len(), 2, "Only immediate children should be listed");
-            assert!(entries.contains(&DirEntry::new("/project/main.rs", DirEntryType::File)));
+            assert!(entries.contains(&PathBuf::from("/project/main.rs").as_path()));
             assert!(
                 !entries
                     .iter()
-                    .any(|p| p == &DirEntry::new("/project/src/lib.rs", DirEntryType::File)),
+                    .any(|&p| p == PathBuf::from("/project/src/lib.rs").as_path()),
                 "Nested file should not be included"
             );
 
@@ -1238,12 +1234,12 @@ mod tests {
                 2,
                 "Both file and subdirectory should be listed"
             );
-            assert!(entries.contains(&DirEntry::new("/mix/file1.txt", DirEntryType::File)));
-            assert!(entries.contains(&DirEntry::new("/mix/subdir", DirEntryType::Directory)));
+            assert!(entries.contains(&PathBuf::from("/mix/file1.txt").as_path()));
+            assert!(entries.contains(&PathBuf::from("/mix/subdir").as_path()));
             assert!(
                 !entries
                     .iter()
-                    .any(|p| p.path().to_str().unwrap().contains("deep.txt")),
+                    .any(|&p| p.to_str().unwrap().contains("deep.txt")),
                 "Deeper nested file should be excluded"
             );
 
@@ -1292,8 +1288,8 @@ mod tests {
                 2,
                 "Current directory should list two items"
             );
-            assert!(base_entries.contains(&DirEntry::new("/base/sub", DirEntryType::Directory)));
-            assert!(base_entries.contains(&DirEntry::new("/base/note.txt", DirEntryType::File)));
+            assert!(base_entries.contains(&PathBuf::from("/base/sub").as_path()));
+            assert!(base_entries.contains(&PathBuf::from("/base/note.txt").as_path()));
 
             Ok(())
         }
@@ -1315,12 +1311,12 @@ mod tests {
                 2,
                 "Should include both file and subdir at level"
             );
-            assert!(entries.contains(&DirEntry::new("/проект/документ.txt", DirEntryType::File)));
-            assert!(entries.contains(&DirEntry::new("/проект/подпапка", DirEntryType::Directory)));
+            assert!(entries.contains(&PathBuf::from("/проект/документ.txt").as_path()));
+            assert!(entries.contains(&PathBuf::from("/проект/подпапка").as_path()));
             assert!(
                 !entries
                     .iter()
-                    .any(|p| p.path().to_str().unwrap().contains("файл.txt")),
+                    .any(|&p| p.to_str().unwrap().contains("файл.txt")),
                 "Nested unicode file should be excluded"
             );
 
@@ -1343,12 +1339,12 @@ mod tests {
                 2,
                 "Root should list immediate files and dirs"
             );
-            assert!(entries.contains(&DirEntry::new("/a.txt", DirEntryType::File)));
-            assert!(entries.contains(&DirEntry::new("/sub", DirEntryType::Directory)));
+            assert!(entries.contains(&PathBuf::from("/a.txt").as_path()));
+            assert!(entries.contains(&PathBuf::from("/sub").as_path()));
             assert!(
                 !entries
                     .iter()
-                    .any(|p| p.path().to_str().unwrap().contains("inner.txt")),
+                    .any(|&p| p.to_str().unwrap().contains("inner.txt")),
                 "Nested file in sub should be excluded"
             );
 
@@ -1408,7 +1404,7 @@ mod tests {
 
             let entries: Vec<_> = fs.tree(fs.cwd())?.collect();
             assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0], DirEntry::new("/file.txt", DirEntryType::File));
+            assert_eq!(entries[0], PathBuf::from("/file.txt"));
 
             Ok(())
         }
@@ -1423,10 +1419,7 @@ mod tests {
 
             let entries: Vec<_> = fs.tree("/docs")?.collect();
             assert_eq!(entries.len(), 1);
-            assert_eq!(
-                entries[0],
-                DirEntry::new("/docs/readme.txt", DirEntryType::File)
-            );
+            assert_eq!(entries[0], PathBuf::from("/docs/readme.txt"));
 
             Ok(())
         }
@@ -1481,7 +1474,7 @@ mod tests {
             assert_eq!(entries.len(), 1);
             assert_eq!(
                 entries[0],
-                DirEntry::new("/docs/sub/file.txt", DirEntryType::File)
+                PathBuf::from("/docs/sub/file.txt")
             );
 
             Ok(())
@@ -1500,12 +1493,9 @@ mod tests {
             let entries: Vec<_> = fs.tree("/проект")?.collect();
 
             assert_eq!(entries.len(), 3);
-            assert!(entries.contains(&DirEntry::new("/проект/документ.txt", DirEntryType::File)));
-            assert!(entries.contains(&DirEntry::new("/проект/подпапка", DirEntryType::Directory)));
-            assert!(entries.contains(&DirEntry::new(
-                "/проект/подпапка/файл.txt",
-                DirEntryType::File
-            )));
+            assert!(entries.contains(&PathBuf::from("/проект/документ.txt").as_path()));
+            assert!(entries.contains(&PathBuf::from("/проект/подпапка").as_path()));
+            assert!(entries.contains(&PathBuf::from("/проект/подпапка/файл.txt").as_path()));
 
             Ok(())
         }
@@ -1524,12 +1514,12 @@ mod tests {
             assert!(
                 !entries
                     .iter()
-                    .any(|p| p == &DirEntry::new("/parent", DirEntryType::Directory))
+                    .any(|&p| p == &PathBuf::from("/parent"))
             );
             assert!(
                 entries
                     .iter()
-                    .any(|p| p == &DirEntry::new("/parent/child.txt", DirEntryType::File))
+                    .any(|&p| p == &PathBuf::from("/parent/child.txt"))
             );
 
             Ok(())

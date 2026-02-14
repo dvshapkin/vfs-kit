@@ -6,13 +6,13 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::anyhow;
 
-use crate::{DirEntry, DirEntryType};
-use crate::core::{utils, FsBackend, Result};
+use crate::core::{FsBackend, Result, utils};
+use crate::{Entry, EntryType};
 
 pub struct MapFS {
-    root: PathBuf,                        // host-related absolute normalized path
-    cwd: PathBuf,                         // inner absolute normalized path
-    entries: BTreeMap<PathBuf, DirEntry>, // inner absolute normalized paths
+    root: PathBuf,                     // host-related absolute normalized path
+    cwd: PathBuf,                      // inner absolute normalized path
+    entries: BTreeMap<PathBuf, Entry>, // inner absolute normalized paths
 }
 
 impl MapFS {
@@ -91,7 +91,7 @@ impl FsBackend for MapFS {
         Ok(self.entries[&inner].is_file())
     }
 
-    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item=DirEntry>> {
+    fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>> {
         let inner_path = self.to_inner(path);
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
@@ -100,15 +100,15 @@ impl FsBackend for MapFS {
         Ok(self
             .entries
             .iter()
-            .map(|(_, entry)| entry.clone())
-            .filter(move |entry| {
-                entry.path().starts_with(&inner_path)
-                    && entry.path() != inner_path
-                    && entry.path().components().count() == component_count
+            .map(|(pb, _)| pb.as_path())
+            .filter(move |&path| {
+                path.starts_with(&inner_path)
+                    && path != inner_path
+                    && path.components().count() == component_count
             }))
     }
 
-    fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item=DirEntry>> {
+    fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>> {
         let inner_path = self.to_inner(path);
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
@@ -116,10 +116,8 @@ impl FsBackend for MapFS {
         Ok(self
             .entries
             .iter()
-            .map(|(_, entry)| entry.clone())
-            .filter(move |entry| {
-                entry.path().starts_with(&inner_path) && entry.path() != inner_path
-            }))
+            .map(|(pb, _)| pb.as_path())
+            .filter(move |&path| path.starts_with(&inner_path) && path != inner_path))
     }
 
     fn mkdir<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
@@ -154,10 +152,8 @@ impl FsBackend for MapFS {
         for component in need_to_create {
             built.push(component);
             if !self.exists(&built) {
-                self.entries.insert(
-                    built.clone(),
-                    DirEntry::new(&built, DirEntryType::Directory),
-                );
+                self.entries
+                    .insert(built.clone(), Entry::new(&built, EntryType::Directory));
             }
         }
 
@@ -176,10 +172,8 @@ impl FsBackend for MapFS {
 
         todo!("Where to store the file content?");
 
-        self.entries.insert(
-            file_path.clone(),
-            DirEntry::new(&file_path, DirEntryType::File),
-        );
+        self.entries
+            .insert(file_path.clone(), Entry::new(&file_path, EntryType::File));
         if let Some(content) = content {
             //fd.write_all(content)?;
         }
@@ -231,13 +225,11 @@ impl FsBackend for MapFS {
     }
 
     fn cleanup(&mut self) -> bool {
-        let mut is_ok = true;
-
         // Collect all paths to delete (except the root "/")
         let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
-        for (path, entry) in &self.entries {
-            if !entry.is_root() {
-                sorted_paths_to_remove.insert(path.clone());
+        for (pb, _) in &self.entries {
+            if pb != "/" {
+                sorted_paths_to_remove.insert(pb.clone());
             }
         }
 
@@ -245,6 +237,6 @@ impl FsBackend for MapFS {
             self.entries.remove(entry);
         }
 
-        is_ok
+        true
     }
 }

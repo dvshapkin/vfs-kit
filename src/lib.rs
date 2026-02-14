@@ -18,4 +18,4 @@ mod core;
 mod vfs;
 
 pub use core::{Result, FsBackend};
-pub use vfs::{DirFS, DirEntry, DirEntryType};
+pub use vfs::{DirFS, Entry, EntryType};
