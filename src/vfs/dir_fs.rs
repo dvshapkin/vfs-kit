@@ -353,6 +353,24 @@ impl FsBackend for DirFS {
         self.entries.contains_key(&inner)
     }
 
+    /// Checks if `path` is a directory.
+    fn is_dir<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
+        let path = path.as_ref();
+        if !self.exists(&path) {
+            return Err(anyhow!("{} does not exist", path.display()));
+        }
+        Ok(self.entries[path].is_dir())
+    }
+
+    /// Checks if `path` is a regular file.
+    fn is_file<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
+        let path = path.as_ref();
+        if !self.exists(&path) {
+            return Err(anyhow!("{} does not exist", path.display()));
+        }
+        Ok(self.entries[path].is_file())
+    }
+
     /// Returns an iterator over directory entries at a specific depth (shallow listing).
     ///
     /// This method lists only the **immediate children** of the given directory,

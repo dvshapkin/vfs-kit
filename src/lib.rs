@@ -1,29 +1,18 @@
-//! A lightweight, extensible virtual filesystem (VFS) toolkit for Rust. Provides in‑process abstractions over real
-//! or simulated filesystems, ideal for testing, sandboxing, custom storage backends, and so on.
+//! A lightweight, extensible set of virtual file systems (VFS) for Rust.
+//! Provides abstractions over real or pseudo-file systems. Ideal for testing,
+//! isolated sandboxing, custom storage backends, and more.
 //! 
 //! ### Overview
 //! 
-//! `vfs-kit` lets you work with filesystem-like structures in Rust without touching the real disk (unless you want to).
-//! It defines a common `FsBackend` trait and provides concrete implementations like `DirFS` that map to real directories.
-//! 
+//! `vfs-kit` allows you to work with filesystem-like structures in Rust without touching the actual disk (unless you want to).
+//! It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS`, which map to actual directories.
+//!
 //! **Key ideas**:
-//! - **Abstraction**: Treat different storage backends (real dirs, memory maps, etc.) via a unified API.
-//! - **Safety**: Operations are confined to a root path; no accidental host filesystem access.
+//! - **Abstraction**: Work with different types of storage (real directories, memory cards, etc.) through a single API.
+//! - **Safety**: Operations are performed only within the VFS root directory; random access to the host file system is excluded.
 //! - **Testability**: Use in unit tests to simulate filesystems without side effects.
-//! - **Extensibility**: Plug in new backends by implementing `FsBackend`.
-//! - **Clarity**: Comprehensive error messages and documentation.
-//! 
-//! ### Features
-//! 
-//! - Path normalization (`.`, `..`, trailing slashes)
-//! - Current working directory (`cwd`) support
-//! - Create/read/write/remove files and directories
-//! - Existence checks and state tracking
-//! - Auto‑cleanup on drop (optional)
-//! - Cross‑platform path handling
-//! - Rich error messages via `anyhow`
-//! - Clean, documented API
-//! - Easy to extend with custom backends
+//! - **Extensibility**: Create your own storages by adding new `FsBackend` implementations.
+//! - **Clarity**: Detailed error messages and up-to-date documentation.
 
 mod core;
 mod vfs;

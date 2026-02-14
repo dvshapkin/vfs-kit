@@ -26,13 +26,11 @@ cargo add vfs-kit
 ```
 
 ## What's new in last version?
-### [0.1.13]
-### Changed
-- This version is entirely dedicated to improving the documentation. I've decided to abandon the neural 
-  network-generated text in favor of less formal, yet more informative and useful, documentation written by myself.
-- Also, the changes affected three functions:
-  + `mkfile()` - if the parent directory not exists, it will be created.
-  + `ls()` and `tree()` - they no longer work with an implicit path parameter.
+### [0.1.14]
+### Added
+- new method `FsBackend::is_dir()`
+- new method `FsBackend::is_file()`
+
 
 ## Overview
 

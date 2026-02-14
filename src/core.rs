@@ -19,6 +19,12 @@ pub trait FsBackend {
 
     /// Returns true, if `path` exists.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool;
+
+    /// Checks if `path` is a directory.
+    fn is_dir<P: AsRef<Path>>(&self, path: P) -> Result<bool>;
+
+    /// Checks if `path` is a regular file.
+    fn is_file<P: AsRef<Path>>(&self, path: P) -> Result<bool>;
     
     /// Returns an iterator over directory entries.
     /// `path` is a directory, or CWD if None.
