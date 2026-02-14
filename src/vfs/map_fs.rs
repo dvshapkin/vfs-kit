@@ -1,8 +1,7 @@
 //! This module provides a virtual filesystem (VFS) implementation that maps to a memory storage.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 
@@ -153,7 +152,7 @@ impl FsBackend for MapFS {
             built.push(component);
             if !self.exists(&built) {
                 self.entries
-                    .insert(built.clone(), Entry::new(&built, EntryType::Directory));
+                    .insert(built.clone(), Entry::new(EntryType::Directory));
             }
         }
 
@@ -167,29 +166,43 @@ impl FsBackend for MapFS {
                 self.mkdir(parent)?;
             }
         }
-        // let host = self.to_host(&file_path)?;
-        // let mut fd = std::fs::File::create(host)?;
 
-        todo!("Where to store the file content?");
-
-        self.entries
-            .insert(file_path.clone(), Entry::new(&file_path, EntryType::File));
+        let mut entry = Entry::new(EntryType::File);
         if let Some(content) = content {
-            //fd.write_all(content)?;
+            entry.set_content(content);
         }
+        self.entries.insert(file_path.clone(), entry);
+
         Ok(())
     }
 
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
-        todo!()
+        let path = path.as_ref();
+        if !self.exists(path) {
+            return Err(anyhow!("{} does not exist", path.display()));
+        }
+        if let Some(content) = self.entries[path].content() {
+            return Ok(content.clone())
+        }
+        Ok(Vec::new())
     }
 
-    fn write<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
-        todo!()
+    fn write<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
+        let path = path.as_ref();
+        if !self.exists(path) {
+            return Err(anyhow!("{} does not exist", path.display()));
+        }
+        self.entries.get_mut(path).unwrap().set_content(content);   // safe unwrap()
+        Ok(())
     }
 
-    fn append<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
-        todo!()
+    fn append<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
+        let path = path.as_ref();
+        if !self.exists(path) {
+            return Err(anyhow!("{} does not exist", path.display()));
+        }
+        self.entries.get_mut(path).unwrap().append_content(content);   // safe unwrap()
+        Ok(())
     }
 
     fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {

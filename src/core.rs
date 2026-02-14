@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use anyhow;
-use crate::Entry;
 
 /// FsBackend defines a common API for all virtual file systems (vfs) in the crate.
 /// Some functions here use `path` as a parameter or return value.
@@ -48,10 +47,10 @@ pub trait FsBackend {
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>>;
 
     /// Writes bytes to an existing file, replacing its entire contents.
-    fn write<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()>;
+    fn write<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()>;
 
     /// Appends bytes to the end of an existing file, preserving its old contents.
-    fn append<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()>;
+    fn append<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()>;
 
     /// Removes a file or directory at the specified path.
     fn rm<P: AsRef<Path>>(&mut self, path: P) -> Result<()>;
@@ -65,7 +64,7 @@ pub type Result<T> = std::result::Result<T, anyhow::Error>;
 pub mod utils {
     use std::path::{Component, Path, PathBuf};
     use super::Result;
-    
+
     /// Normalizes an arbitrary `path` by processing all occurrences
     /// of '.' and '..' elements. Also, removes final `/`.
     pub fn normalize<P: AsRef<Path>>(path: P) -> PathBuf {

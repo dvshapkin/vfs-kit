@@ -13,7 +13,7 @@
 use anyhow::anyhow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::core::{FsBackend, Result, utils};
 use crate::{Entry, EntryType};
@@ -87,7 +87,7 @@ impl DirFS {
         let mut entries = BTreeMap::new();
         entries.insert(
             inner_root.clone(),
-            Entry::new(&inner_root, EntryType::Directory),
+            Entry::new(EntryType::Directory),
         );
 
         Ok(Self {
@@ -264,8 +264,7 @@ impl DirFS {
         } else {
             EntryType::File
         };
-        let entry = Entry::new(inner_path, entry_type);
-        self.entries.insert(inner_path.to_path_buf(), entry);
+        self.entries.insert(inner_path.to_path_buf(), Entry::new(entry_type));
 
         if host_path.is_dir() {
             for entry in std::fs::read_dir(host_path)? {
@@ -495,7 +494,7 @@ impl FsBackend for DirFS {
                 let host = self.to_host(&built)?;
                 std::fs::create_dir(&host)?;
                 self.entries
-                    .insert(built.clone(), Entry::new(&built, EntryType::Directory));
+                    .insert(built.clone(), Entry::new(EntryType::Directory));
             }
         }
 
@@ -516,7 +515,7 @@ impl FsBackend for DirFS {
         let host = self.to_host(&file_path)?;
         let mut fd = std::fs::File::create(host)?;
         self.entries
-            .insert(file_path.clone(), Entry::new(&file_path, EntryType::File));
+            .insert(file_path.clone(), Entry::new(EntryType::File));
         if let Some(content) = content {
             fd.write_all(content)?;
         }
@@ -572,7 +571,7 @@ impl FsBackend for DirFS {
     /// - **No file creation**: File must exist (use `mkfile()` first).
     /// - **Atomic operation**: Uses `std::fs::write()` which replaces the file in one step.
     /// - **Permissions**: The file retains its original permissions (no chmod is performed).
-    fn write<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
+    fn write<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
         if !self.exists(&inner) {
             return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
@@ -608,7 +607,7 @@ impl FsBackend for DirFS {
     /// - **No parent creation**: Parent directories must exist (use `mkdir()` first if needed).
     /// - **File creation**: Does NOT create the file if it doesn't exist (returns error).
     /// - **Permissions**: The file retains its original permissions.
-    fn append<P: AsRef<Path>>(&self, path: P, content: &[u8]) -> Result<()> {
+    fn append<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
         if !self.exists(&inner) {
             return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
@@ -2199,7 +2198,7 @@ mod tests {
         #[test]
         fn test_write_to_nonexistent_file() -> Result<()> {
             let temp_dir = setup_test_env();
-            let fs = DirFS::new(temp_dir.path())?;
+            let mut fs = DirFS::new(temp_dir.path())?;
 
             let result = fs.write("/parent/child.txt", b"Content");
             assert!(result.is_err());
@@ -2292,7 +2291,7 @@ mod tests {
         #[test]
         fn test_append_nonexistent_file() -> Result<()> {
             let temp_dir = setup_test_env();
-            let fs = DirFS::new(temp_dir.path())?;
+            let mut fs = DirFS::new(temp_dir.path())?;
 
             let result = fs.append("/not_found.txt", b"Content");
             assert!(result.is_err());
