@@ -452,11 +452,13 @@ impl FsBackend for DirFS {
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
         }
+        let is_file = self.is_file(&inner_path)?;
         Ok(self
             .entries
             .iter()
             .map(|(pb, _)| pb.as_path())
-            .filter(move |&path| path.starts_with(&inner_path) && path != inner_path))
+            .filter(move |&path| path.starts_with(&inner_path)
+                && (path != inner_path || is_file)))
     }
 
     /// Creates directory and all it parents (if needed).

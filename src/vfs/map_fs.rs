@@ -217,7 +217,7 @@ impl FsBackend for MapFS {
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
         }
-        let is_file =  self.is_file(&inner_path)?;
+        let is_file = self.is_file(&inner_path)?;
         let component_count = if is_file {
             inner_path.components().count()
         } else {
@@ -285,11 +285,13 @@ impl FsBackend for MapFS {
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
         }
+        let is_file = self.is_file(&inner_path)?;
         Ok(self
             .entries
             .iter()
             .map(|(pb, _)| pb.as_path())
-            .filter(move |&path| path.starts_with(&inner_path) && path != inner_path))
+            .filter(move |&path| path.starts_with(&inner_path)
+                && (path != inner_path || is_file)))
     }
 
     /// Creates directory and all it parents (if needed).
@@ -517,7 +519,8 @@ mod tests {
             vfs.mkdir("/home").unwrap();
             vfs.mkdir("/home/user").unwrap();
             vfs.mkdir("/etc").unwrap();
-            vfs.mkfile("/home/user/config.txt", Some(b"Config content")).unwrap();
+            vfs.mkfile("/home/user/config.txt", Some(b"Config content"))
+                .unwrap();
 
             vfs
         }
@@ -654,7 +657,7 @@ mod tests {
             vfs.mkdir("/home").unwrap();
             vfs.mkdir("/home/user").unwrap();
             vfs.mkfile("/home/user/file.txt", Some(b"Hello")).unwrap();
-        vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
+            vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
 
             vfs
         }
@@ -713,7 +716,7 @@ mod tests {
         #[test]
         fn test_exists_with_trailing_slash() {
             let vfs = setup_test_vfs();
-            assert!(vfs.exists("/home/"));      // Should normalize to /home
+            assert!(vfs.exists("/home/")); // Should normalize to /home
             assert!(vfs.exists("/home/user/")); // Should normalize to /home/user
             assert!(vfs.exists("/readme.md/")); // File with trailing slash
         }
@@ -741,7 +744,7 @@ mod tests {
         #[test]
         fn test_exists_dot_path() {
             let vfs = setup_test_vfs();
-            assert!(vfs.exists("."));     // Current directory
+            assert!(vfs.exists(".")); // Current directory
             assert!(vfs.exists("./home")); // Relative with dot
         }
 
@@ -749,9 +752,9 @@ mod tests {
         fn test_exists_double_dot_path() {
             let mut vfs = setup_test_vfs();
             vfs.cd("/home/user").unwrap();
-            assert!(vfs.exists(".."));           // Parent directory
-            assert!(vfs.exists("../user"));    // Sibling
-            assert!(vfs.exists("../../etc"));   // Up two levels
+            assert!(vfs.exists("..")); // Parent directory
+            assert!(vfs.exists("../user")); // Sibling
+            assert!(vfs.exists("../../etc")); // Up two levels
         }
     }
 
@@ -767,7 +770,7 @@ mod tests {
             vfs.mkdir("/home").unwrap();
             vfs.mkdir("/home/user").unwrap();
             vfs.mkfile("/home/user/file.txt", Some(b"Hello")).unwrap();
-        vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
+            vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
             vfs.mkfile("/empty.bin", None).unwrap(); // Empty file
 
             vfs
@@ -859,8 +862,8 @@ mod tests {
             let vfs = setup_test_vfs();
             let file_path = "/home/user/file.txt";
 
-            assert!(!vfs.is_dir(file_path)?);  // Not a directory
-            assert!(vfs.is_file(file_path)?);   // Is a file
+            assert!(!vfs.is_dir(file_path)?); // Not a directory
+            assert!(vfs.is_file(file_path)?); // Is a file
 
             Ok(())
         }
@@ -870,7 +873,7 @@ mod tests {
             let vfs = setup_test_vfs();
             let dir_path = "/home/user";
 
-            assert!(vfs.is_dir(dir_path)?);     // Is a directory
+            assert!(vfs.is_dir(dir_path)?); // Is a directory
             assert!(!vfs.is_file(dir_path)?); // Not a file
 
             Ok(())
@@ -879,7 +882,7 @@ mod tests {
         #[test]
         fn test_is_dir_with_trailing_slash() -> Result<()> {
             let vfs = setup_test_vfs();
-            assert!(vfs.is_dir("/home/")?);      // Trailing slash
+            assert!(vfs.is_dir("/home/")?); // Trailing slash
             assert!(vfs.is_dir("/home/user/")?);
             Ok(())
         }
@@ -898,7 +901,7 @@ mod tests {
             let mut vfs = setup_test_vfs();
             vfs.cd("/home").unwrap();
 
-            assert!(vfs.is_dir(".")?);    // Current directory
+            assert!(vfs.is_dir(".")?); // Current directory
             assert!(vfs.is_dir("./user")?); // Subdirectory
             Ok(())
         }
@@ -917,10 +920,10 @@ mod tests {
             let mut vfs = setup_test_vfs();
             vfs.cd("/home/user").unwrap();
 
-            assert!(vfs.is_dir("..")?);       // Parent (/home)
+            assert!(vfs.is_dir("..")?); // Parent (/home)
 
             let result = vfs.is_dir("../etc");
-            assert!(result.is_err());  // Sibling directory (not existed)
+            assert!(result.is_err()); // Sibling directory (not existed)
             // Note: ../etc doesn't exist in our setup, so this would fail
             // But .. itself should pass
             Ok(())
@@ -939,10 +942,12 @@ mod tests {
             vfs.mkdir("/home").unwrap();
             vfs.mkdir("/home/user").unwrap();
             vfs.mkdir("/home/guest").unwrap();
-            vfs.mkfile("/home/user/file1.txt", Some(b"Content 1")).unwrap();
-        vfs.mkfile("/home/user/file2.txt", Some(b"Content 2")).unwrap();
+            vfs.mkfile("/home/user/file1.txt", Some(b"Content 1"))
+                .unwrap();
+            vfs.mkfile("/home/user/file2.txt", Some(b"Content 2"))
+                .unwrap();
             vfs.mkfile("/home/guest/note.txt", Some(b"Note")).unwrap();
-        vfs.mkfile("/readme.md", Some(b"Docs")).unwrap();
+            vfs.mkfile("/readme.md", Some(b"Docs")).unwrap();
 
             vfs
         }
@@ -969,7 +974,6 @@ mod tests {
             assert!(entries.contains(&Path::new("/home/user")));
             assert!(entries.contains(&Path::new("/home/guest")));
 
-
             Ok(())
         }
 
@@ -981,7 +985,6 @@ mod tests {
             assert_eq!(entries.len(), 2);
             assert!(entries.contains(&Path::new("/home/user/file1.txt")));
             assert!(entries.contains(&Path::new("/home/user/file2.txt")));
-
 
             Ok(())
         }
@@ -1021,11 +1024,9 @@ mod tests {
             let vfs = setup_test_vfs();
             let entries: Vec<_> = vfs.ls("home")?.collect(); // Relative path
 
-
             assert_eq!(entries.len(), 2);
             assert!(entries.contains(&Path::new("/home/user")));
             assert!(entries.contains(&Path::new("/home/guest")));
-
 
             Ok(())
         }
@@ -1041,16 +1042,14 @@ mod tests {
             assert!(entries.contains(&Path::new("/home/user/file1.txt")));
             assert!(entries.contains(&Path::new("/home/user/file2.txt")));
 
-
             Ok(())
         }
 
         #[test]
         fn test_ls_with_trailing_slash() -> Result<()> {
             let vfs = setup_test_vfs();
-            let entries1: Vec<_> = vfs.ls("/home/")?.collect();   // With slash
-            let entries2: Vec<_> = vfs.ls("/home")?.collect();    // Without slash
-
+            let entries1: Vec<_> = vfs.ls("/home/")?.collect(); // With slash
+            let entries2: Vec<_> = vfs.ls("/home")?.collect(); // Without slash
 
             assert_eq!(entries1, entries2); // Results should be identical
             Ok(())
@@ -1094,13 +1093,227 @@ mod tests {
             let count = iter.count();
             assert_eq!(count + 1, 2); // +1 because we already took one with next()
 
-
             Ok(())
         }
     }
 
     mod tree {
         use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create a nested hierarchy
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkdir("/home/user/projects").unwrap();
+            vfs.mkdir("/home/guest").unwrap();
+            vfs.mkfile("/home/user/file1.txt", Some(b"Content 1"))
+                .unwrap();
+            vfs.mkfile("/home/user/projects/proj1.rs", Some(b"Code 1"))
+                .unwrap();
+            vfs.mkfile("/home/user/projects/proj2.rs", Some(b"Code 2"))
+                .unwrap();
+            vfs.mkfile("/home/guest/note.txt", Some(b"Note")).unwrap();
+            vfs.mkfile("/readme.md", Some(b"Docs")).unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_tree_root() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.tree("/")?.collect();
+
+            assert_eq!(entries.len(), 10);
+            assert!(entries.contains(&Path::new("/etc")));
+            assert!(entries.contains(&Path::new("/home")));
+            assert!(entries.contains(&Path::new("/home/user")));
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+            assert!(entries.contains(&Path::new("/home/guest")));
+            assert!(entries.contains(&Path::new("/home/guest/note.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_home_directory() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.tree("/home")?.collect();
+
+            assert_eq!(entries.len(), 7);
+            assert!(entries.contains(&Path::new("/home/user")));
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+            assert!(entries.contains(&Path::new("/home/guest")));
+            assert!(entries.contains(&Path::new("/home/guest/note.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_user_directory() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.tree("/home/user")?.collect();
+
+            assert_eq!(entries.len(), 4);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_nonexistent_path() {
+            let vfs = setup_test_vfs();
+            let result: Result<Vec<_>> = vfs.tree("/nonexistent").map(|iter| iter.collect());
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error should mention path does not exist"
+            );
+        }
+
+        #[test]
+        fn test_tree_file_path() {
+            let vfs = setup_test_vfs();
+            let result: Result<Vec<_>> = vfs.tree("/home/user/file1.txt").map(|iter| iter.collect());
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), vec!["/home/user/file1.txt"]);
+        }
+
+        #[test]
+        fn test_tree_empty_directory() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.mkdir("/empty_dir").unwrap();
+
+            let entries: Vec<_> = vfs.tree("/empty_dir")?.collect();
+            assert_eq!(entries.len(), 0); // Empty directory → empty iterator
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_relative_path_from_root() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.tree("home")?.collect(); // Relative path
+
+            assert_eq!(entries.len(), 7);
+            assert!(entries.contains(&Path::new("/home/user")));
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+            assert!(entries.contains(&Path::new("/home/guest")));
+            assert!(entries.contains(&Path::new("/home/guest/note.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_relative_path_nested() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home").unwrap();
+
+            let entries: Vec<_> = vfs.tree("user")?.collect();
+
+            assert_eq!(entries.len(), 4);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_with_trailing_slash() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries1: Vec<_> = vfs.tree("/home/")?.collect(); // With slash
+            let entries2: Vec<_> = vfs.tree("/home")?.collect(); // Without slash
+
+            assert_eq!(entries1, entries2); // Results should be identical
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap();
+
+            let entries: Vec<_> = vfs.tree(".")?.collect();
+            assert_eq!(entries.len(), 4);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_double_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user/projects").unwrap();
+
+            let entries: Vec<_> = vfs.tree("..")?.collect(); // Parent directory
+            assert_eq!(entries.len(), 4);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/projects")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj1.rs")));
+            assert!(entries.contains(&Path::new("/home/user/projects/proj2.rs")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_single_entry() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.mkdir("/single").unwrap();
+
+            let entries: Vec<_> = vfs.tree("/single")?.collect();
+            assert_eq!(entries.len(), 0); // No children → empty
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_iterator_lazy_evaluation() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let mut iter = vfs.tree("/home/user")?;
+
+            // Test that iterator doesn't panic on immediate creation
+            assert!(iter.next().is_some());
+
+            // Consume remaining items
+            let count = iter.count();
+            assert_eq!(count + 1, 4); // +1 because we already took one with next()
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_tree_case_sensitivity() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.mkdir("/CASE_TEST").unwrap();
+            vfs.mkfile("/CASE_TEST/file.txt", Some(b"Data")).unwrap();
+
+            let entries: Vec<_> = vfs.tree("/CASE_TEST")?.collect();
+
+            assert_eq!(entries.len(), 1);
+            assert!(entries.contains(&Path::new("/CASE_TEST/file.txt")));
+
+            Ok(())
+        }
     }
 
     mod mkdir_mkfile {
