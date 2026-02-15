@@ -270,7 +270,7 @@ impl FsBackend for MapFS {
     /// - The iterator borrows data from VFS. The returned iterator is valid as long
     ///   as `self` is alive.
     /// - Symbolic links are treated as regular entries (no follow/resolve).
-    /// - Use `DirFS` methods (e.g., `is_file()`, `is_dir()`) for yielded items for type checks.
+    /// - Use `MapFS` methods (e.g., `is_file()`, `is_dir()`) for yielded items for type checks.
     fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>> {
         let inner_path = self.to_inner(path);
         if !self.exists(&inner_path) {

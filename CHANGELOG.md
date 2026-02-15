@@ -9,9 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.14] - 2026-02-14
 
 ### Added
+- `MapFS` implementation
 - new method `FsBackend::to_host()`
 - new method `FsBackend::is_dir()`
 - new method `FsBackend::is_file()`
+
+### Changed
++ `ls()` and `tree()` - the item type in the iterator is now `&Path`
+
+### Fixed
+- Inaccuracies in the documentation have been corrected
 
 ## [0.1.13] - 2026-02-13
 

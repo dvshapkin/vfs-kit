@@ -28,9 +28,14 @@ cargo add vfs-kit
 ## What's new in last version?
 ### [0.1.14]
 ### Added
+- `MapFS` implementation
 - new method `FsBackend::to_host()`
 - new method `FsBackend::is_dir()`
 - new method `FsBackend::is_file()`
+### Changed
++ `ls()` and `tree()` - the item type in the iterator is now `&Path`
+### Fixed
+- Inaccuracies in the documentation have been corrected
 
 
 ## Overview
