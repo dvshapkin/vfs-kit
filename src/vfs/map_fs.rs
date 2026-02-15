@@ -636,4 +636,117 @@ mod tests {
             Ok(())
         }
     }
+
+    mod exists {
+        use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create a sample hierarchy
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkfile("/home/user/file.txt", Some(b"Hello")).unwrap();
+        vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_exists_absolute_path_file() {
+            let vfs = setup_test_vfs();
+            assert!(vfs.exists("/home/user/file.txt"));
+        }
+
+        #[test]
+        fn test_exists_absolute_path_directory() {
+            let vfs = setup_test_vfs();
+            assert!(vfs.exists("/home/user"));
+        }
+
+        #[test]
+        fn test_exists_root_directory() {
+            let vfs = setup_test_vfs();
+            assert!(vfs.exists("/"));
+        }
+
+        #[test]
+        fn test_exists_relative_path_from_root() {
+            let vfs = setup_test_vfs();
+            // Current CWD is "/" by default
+            assert!(vfs.exists("home/user/file.txt"));
+        }
+
+        #[test]
+        fn test_exists_relative_path_nested() {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap(); // Change CWD
+            assert!(vfs.exists("file.txt")); // Relative to current CWD
+        }
+
+        #[test]
+        fn test_exists_nonexistent_file() {
+            let vfs = setup_test_vfs();
+            assert!(!vfs.exists("/home/user/nonexistent.txt"));
+        }
+
+        #[test]
+        fn test_exists_nonexistent_directory() {
+            let vfs = setup_test_vfs();
+            assert!(!vfs.exists("/tmp"));
+        }
+
+        #[test]
+        fn test_exists_partial_path() {
+            let vfs = setup_test_vfs();
+            // "/home/us" is not a complete path in our hierarchy
+            assert!(!vfs.exists("/home/us"));
+        }
+
+        #[test]
+        fn test_exists_with_trailing_slash() {
+            let vfs = setup_test_vfs();
+            assert!(vfs.exists("/home/"));      // Should normalize to /home
+            assert!(vfs.exists("/home/user/")); // Should normalize to /home/user
+            assert!(vfs.exists("/readme.md/")); // File with trailing slash
+        }
+
+        #[test]
+        fn test_exists_case_sensitivity() {
+            #[cfg(unix)]
+            {
+                let mut vfs = setup_test_vfs();
+                // Add a mixed-case path
+                vfs.mkdir("/Home/User").unwrap();
+
+                assert!(vfs.exists("/Home/User"));
+                assert!(!vfs.exists("/home/User")); // Different case
+            }
+        }
+
+        #[test]
+        fn test_exists_empty_string() {
+            let vfs = setup_test_vfs();
+            // Empty string should resolve to CWD (which is "/")
+            assert!(vfs.exists(""));
+        }
+
+        #[test]
+        fn test_exists_dot_path() {
+            let vfs = setup_test_vfs();
+            assert!(vfs.exists("."));     // Current directory
+            assert!(vfs.exists("./home")); // Relative with dot
+        }
+
+        #[test]
+        fn test_exists_double_dot_path() {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap();
+            assert!(vfs.exists(".."));           // Parent directory
+            assert!(vfs.exists("../user"));    // Sibling
+            assert!(vfs.exists("../../etc"));   // Up two levels
+        }
+    }
 }
