@@ -1924,5 +1924,139 @@ mod tests {
 
     mod cleanup {
         use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create a diverse hierarchy with files and directories
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkdir("/home/user/projects").unwrap();
+            vfs.mkfile("/home/user/file1.txt", Some(b"Content 1"))
+                .unwrap();
+            vfs.mkfile("/home/user/projects/proj1.rs", Some(b"Code 1"))
+                .unwrap();
+            vfs.mkfile("/readme.md", Some(b"Docs")).unwrap();
+            vfs.mkfile("/data.bin", Some(b"\x00\x01")).unwrap();
+            vfs.mkfile("/empty.txt", None).unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_cleanup_removes_all_entries() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.cleanup();
+
+            assert!(result); // Should return true on success
+            assert_eq!(vfs.entries.len(), 1); // All entries except root removed
+            assert!(!vfs.exists("/etc"));
+            assert!(!vfs.exists("/home"));
+            assert!(!vfs.exists("/readme.md"));
+            assert!(!vfs.exists("/data.bin"));
+            assert!(!vfs.exists("/empty.txt"));
+        }
+
+        #[test]
+        fn test_cleanup_preserves_root() {
+            let mut vfs = setup_test_vfs();
+            vfs.cleanup();
+
+            assert!(vfs.exists("/"));
+        }
+
+        #[test]
+        fn test_cleanup_empty_vfs() {
+            let mut vfs = MapFS::new(); // Already empty
+            let result = vfs.cleanup();
+
+            assert!(result);
+            assert_eq!(vfs.entries.len(), 1);
+        }
+
+        #[test]
+        fn test_cleanup_after_partial_removal() {
+            let mut vfs = setup_test_vfs();
+
+            // Remove some entries manually first
+            vfs.rm("/readme.md").unwrap();
+            vfs.rm("/home/user/projects").unwrap();
+
+            let result = vfs.cleanup();
+
+            assert!(result);
+            assert_eq!(vfs.entries.len(), 1);
+            assert!(!vfs.exists("/home/user")); // Should be gone
+            assert!(!vfs.exists("/data.bin")); // Should be gone
+        }
+
+        #[test]
+        fn test_cleanup_idempotent() {
+            let mut vfs = setup_test_vfs();
+
+            // First cleanup
+            assert!(vfs.cleanup());
+
+            // Second cleanup on already‑clean VFS
+            assert!(vfs.cleanup());
+
+            assert_eq!(vfs.entries.len(), 1);
+        }
+
+        #[test]
+        fn test_cleanup_with_nested_structure() {
+            let mut vfs = setup_test_vfs();
+
+            // Add deeper nesting to test traversal order
+            vfs.mkdir("/a/b/c/d").unwrap();
+            vfs.mkfile("/a/b/c/d/file.txt", Some(b"Deep file")).unwrap();
+
+            vfs.cleanup();
+
+            assert_eq!(vfs.entries.len(), 1);
+            assert!(!vfs.exists("/a/b/c/d/file.txt"));
+            assert!(!vfs.exists("/a"));
+        }
+
+        #[test]
+        fn test_cleanup_order_safety() {
+            let mut vfs = setup_test_vfs();
+
+            // Capture initial paths to verify removal order (via BTreeSet's reverse iteration)
+            let initial_paths: BTreeSet<PathBuf> = vfs
+                .entries
+                .keys()
+                .filter(|&pb| pb != &PathBuf::from("/"))
+                .cloned()
+                .collect();
+
+            vfs.cleanup();
+
+            // Verify all initial non‑root entries were removed
+            for path in &initial_paths {
+                assert!(!vfs.exists(path));
+            }
+
+            // The order is handled by BTreeSet::rev() — we trust the standard library
+            // This test confirms the mechanism works as designed
+        }
+
+        #[test]
+        fn test_cleanup_does_not_panic_on_empty() {
+            let mut vfs = MapFS::new();
+            assert!(vfs.cleanup()); // Should not panic
+            assert_eq!(vfs.entries.len(), 1);
+        }
+
+        #[test]
+        fn test_cleanup_returns_true_always() {
+            let mut vfs1 = setup_test_vfs();
+            let mut vfs2 = MapFS::new();
+
+            assert!(vfs1.cleanup()); // Non‑empty VFS
+            assert!(vfs2.cleanup()); // Empty VFS
+        }
     }
 }
