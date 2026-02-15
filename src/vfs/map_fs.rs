@@ -1453,7 +1453,7 @@ mod tests {
 
             // Try to create same file again
             let result = vfs.mkfile("/test.txt", Some(b"New"));
-            
+
             assert!(result.is_err());
             assert_eq!(vfs.read("/test.txt")?, b"Original");
 
@@ -1528,6 +1528,216 @@ mod tests {
 
     mod read_write_append {
         use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create sample files and directories
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
+            vfs.mkfile("/data.bin", Some(b"\x00\x01\x02")).unwrap();
+            vfs.mkfile("/empty.txt", None).unwrap(); // Empty file
+            vfs.mkfile("/home/user/file.txt", Some(b"Hello World"))
+                .unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_read_existing_file() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let content = vfs.read("/readme.md")?;
+            assert_eq!(content, b"Project docs");
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_binary_file() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let content = vfs.read("/data.bin")?;
+            assert_eq!(content, vec![0x00, 0x01, 0x02]);
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_empty_file() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let content = vfs.read("/empty.txt")?;
+            assert!(content.is_empty());
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_nonexistent_file() {
+            let vfs = setup_test_vfs();
+            let result = vfs.read("/nonexistent.txt");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("does not exist"),
+                "Error should mention file does not exist"
+            );
+        }
+
+        #[test]
+        fn test_read_directory_as_file() {
+            let vfs = setup_test_vfs();
+            let result = vfs.read("/etc");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("is a directory"),
+                "Reading directory as file should error"
+            );
+        }
+
+        #[test]
+        fn test_write_existing_file() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.write("/readme.md", b"Updated content")?;
+
+            let content = vfs.read("/readme.md")?;
+            assert_eq!(content, b"Updated content");
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_binary_content() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.write("/data.bin", &[0xFF, 0xFE, 0xFD])?;
+
+            let content = vfs.read("/data.bin")?;
+            assert_eq!(content, vec![0xFF, 0xFE, 0xFD]);
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_empty_content() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.write("/empty.txt", &[])?;
+
+            let content = vfs.read("/empty.txt")?;
+            assert!(content.is_empty());
+            Ok(())
+        }
+
+        #[test]
+        fn test_write_nonexistent_file() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.write("/newfile.txt", b"Content");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("does not exist"),
+                "Writing to nonexistent file should fail"
+            );
+        }
+
+        #[test]
+        fn test_write_directory_as_file() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.write("/etc", b"Content");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("is a directory"),
+                "Writing to directory should error"
+            );
+        }
+
+        #[test]
+        fn test_append_to_file() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.append("/readme.md", b" - appended")?;
+
+            let content = vfs.read("/readme.md")?;
+            assert_eq!(content, b"Project docs - appended");
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_binary_data() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.append("/data.bin", &[0xAA, 0xBB])?;
+
+            let content = vfs.read("/data.bin")?;
+            assert_eq!(content, vec![0x00, 0x01, 0x02, 0xAA, 0xBB]);
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_empty_slice() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.append("/empty.txt", &[])?; // Append nothing
+
+            let content = vfs.read("/empty.txt")?;
+            assert!(content.is_empty()); // Still empty
+            Ok(())
+        }
+
+        #[test]
+        fn test_append_nonexistent_file() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.append("/newfile.txt", b"More content");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("does not exist"),
+                "Appending to nonexistent file should fail"
+            );
+        }
+
+        #[test]
+        fn test_append_directory_as_file() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.append("/etc", b"Data");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("is a directory"),
+                "Appending to directory should error"
+            );
+        }
+
+        #[test]
+        fn test_write_and_append_sequence() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            // Start with initial content
+            vfs.mkfile("/test.txt", None)?;
+            vfs.write("/test.txt", b"Initial")?;
+
+            // Append some data
+            vfs.append("/test.txt", b" + appended")?;
+
+            // Overwrite completely
+            vfs.write("/test.txt", b"Overwritten")?;
+
+            let final_content = vfs.read("/test.txt")?;
+            assert_eq!(final_content, b"Overwritten");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_read_after_write_and_append() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            vfs.mkfile("/log.txt", None)?;
+            vfs.write("/log.txt", b"Entry 1\n")?;
+            vfs.append("/log.txt", b"Entry 2\n")?;
+            vfs.write("/log.txt", b"Overwritten log\n")?;
+            vfs.append("/log.txt", b"Final entry\n")?;
+
+            let content = vfs.read("/log.txt")?;
+            assert_eq!(content, b"Overwritten log\nFinal entry\n");
+
+            Ok(())
+        }
     }
 
     mod rm {
