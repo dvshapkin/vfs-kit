@@ -290,8 +290,7 @@ impl FsBackend for MapFS {
             .entries
             .iter()
             .map(|(pb, _)| pb.as_path())
-            .filter(move |&path| path.starts_with(&inner_path)
-                && (path != inner_path || is_file)))
+            .filter(move |&path| path.starts_with(&inner_path) && (path != inner_path || is_file)))
     }
 
     /// Creates directory and all it parents (if needed).
@@ -342,6 +341,9 @@ impl FsBackend for MapFS {
     /// If the parent directory does not exist, it will be created.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
         let file_path = self.to_inner(file_path);
+        if self.exists(&file_path) {
+            return Err(anyhow!("{} already exist", file_path.display()));
+        }
         if let Some(parent) = file_path.parent() {
             if !self.exists(parent) {
                 self.mkdir(parent)?;
@@ -1186,7 +1188,8 @@ mod tests {
         #[test]
         fn test_tree_file_path() {
             let vfs = setup_test_vfs();
-            let result: Result<Vec<_>> = vfs.tree("/home/user/file1.txt").map(|iter| iter.collect());
+            let result: Result<Vec<_>> =
+                vfs.tree("/home/user/file1.txt").map(|iter| iter.collect());
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), vec!["/home/user/file1.txt"]);
         }
@@ -1318,6 +1321,209 @@ mod tests {
 
     mod mkdir_mkfile {
         use super::*;
+
+        /// Helper to create a fresh MapFS instance
+        fn setup_vfs() -> MapFS {
+            MapFS::new()
+        }
+
+        #[test]
+        fn test_mkdir_simple_directory() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/test")?;
+
+            assert!(vfs.exists("/test"));
+            assert!(vfs.is_dir("/test")?);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkdir_nested_directories() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/a/b/c/d")?;
+
+            assert!(vfs.exists("/a"));
+            assert!(vfs.exists("/a/b"));
+            assert!(vfs.exists("/a/b/c"));
+            assert!(vfs.exists("/a/b/c/d"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkdir_existing_path() {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/existing").unwrap();
+
+            let result = vfs.mkdir("/existing");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("path already exists"),
+                "Should error when path exists"
+            );
+        }
+
+        #[test]
+        fn test_mkdir_empty_path() {
+            let mut vfs = setup_vfs();
+            let result = vfs.mkdir("");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("invalid path: empty"),
+                "Empty path should be rejected"
+            );
+        }
+
+        #[test]
+        fn test_mkdir_root_path() {
+            let mut vfs = setup_vfs();
+            let result = vfs.mkdir("/");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("path already exists"),
+                "Root always exists, should error"
+            );
+        }
+
+        #[test]
+        fn test_mkdir_with_trailing_slash() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/test/")?; // Trailing slash
+
+            assert!(vfs.exists("/test"));
+            assert!(vfs.is_dir("/test")?);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkfile_simple_file() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkfile("/file.txt", Some(b"Hello World"))?;
+
+            assert!(vfs.exists("/file.txt"));
+            assert!(vfs.is_file("/file.txt")?);
+            assert_eq!(vfs.read("/file.txt")?, b"Hello World");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkfile_in_nested_directory() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkfile("/a/b/c/file.txt", Some(b"Content"))?;
+
+            // All parent directories should be created
+            assert!(vfs.exists("/a"));
+            assert!(vfs.exists("/a/b"));
+            assert!(vfs.exists("/a/b/c"));
+            assert!(vfs.exists("/a/b/c/file.txt"));
+
+            assert_eq!(vfs.read("/a/b/c/file.txt")?, b"Content");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkfile_empty_content() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkfile("/empty.txt", None)?; // No content
+
+            assert!(vfs.exists("/empty.txt"));
+            assert!(vfs.is_file("/empty.txt")?);
+            assert_eq!(vfs.read("/empty.txt")?, &[]);
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkfile_existing_file() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkfile("/test.txt", Some(b"Original"))?;
+
+            // Try to create same file again
+            let result = vfs.mkfile("/test.txt", Some(b"New"));
+            
+            assert!(result.is_err());
+            assert_eq!(vfs.read("/test.txt")?, b"Original");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkfile_to_existing_directory() {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/dir").unwrap();
+
+            let result = vfs.mkfile("/dir", Some(b"Content"));
+            assert!(result.is_err());
+            // Depending on design, this might be allowed or not
+            // Current implementation tries to create file at existing dir path
+            // Consider whether this should be an error
+        }
+
+        #[test]
+        fn test_mkfile_with_trailing_slash() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkfile("/file.txt/", Some(b"With slash"))?;
+
+            assert!(vfs.exists("/file.txt")); // Should normalize
+            assert_eq!(vfs.read("/file.txt")?, b"With slash");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkfile_relative_path() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/home")?;
+            vfs.cd("/home")?; // Assume /home exists
+
+            vfs.mkfile("file.txt", Some(b"Relative"))?;
+
+            assert!(vfs.exists("/home/file.txt"));
+            assert_eq!(vfs.read("/home/file.txt")?, b"Relative");
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkdir_and_mkfile_combination() -> Result<()> {
+            let mut vfs = setup_vfs();
+
+            vfs.mkdir("/projects")?;
+            vfs.mkfile("/projects/main.rs", Some(b"fn main() {}"))?;
+            vfs.mkdir("/projects/tests")?;
+            vfs.mkfile("/projects/tests/test1.rs", Some(b"#[test]"))?;
+
+            assert!(vfs.exists("/projects"));
+            assert!(vfs.exists("/projects/main.rs"));
+            assert!(vfs.exists("/projects/tests"));
+            assert!(vfs.exists("/projects/tests/test1.rs"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_mkdir_case_sensitivity() -> Result<()> {
+            let mut vfs = setup_vfs();
+            vfs.mkdir("/CaseDir")?;
+
+            assert!(vfs.exists("/CaseDir"));
+            assert!(!vfs.exists("/casedir")); // Case-sensitive
+
+            Ok(())
+        }
     }
 
     mod read_write_append {

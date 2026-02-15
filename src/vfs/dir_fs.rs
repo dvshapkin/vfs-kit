@@ -511,6 +511,9 @@ impl FsBackend for DirFS {
     /// If the parent directory does not exist, it will be created.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
         let file_path = self.to_inner(file_path);
+        if self.exists(&file_path) {
+            return Err(anyhow!("{} already exist", file_path.display()));
+        }
         if let Some(parent) = file_path.parent() {
             if !self.exists(parent) {
                 self.mkdir(parent)?;
@@ -1914,7 +1917,7 @@ mod tests {
 
             // Trying to create the same file again
             let result = fs.mkfile("/existing.txt", None);
-            assert!(result.is_ok()); // Should overwrite (File::create truncates the file)
+            assert!(result.is_err());
             assert!(fs.exists("/existing.txt"));
         }
 
