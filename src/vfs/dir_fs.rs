@@ -310,7 +310,7 @@ impl FsBackend for DirFS {
         Ok(())
     }
 
-    /// Checks if a `path` exists in the vfs.
+    /// Checks if a `path` exists in the VFS.
     /// The `path` can be in relative or absolute form.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         let inner = self.to_inner(path);
@@ -347,7 +347,7 @@ impl FsBackend for DirFS {
     /// * `path` - path to the directory to list (must exist in VFS).
     ///
     /// # Returns
-    /// * `Ok(impl Iterator<Item = DirEntry>)` - Iterator over entries of immediate children
+    /// * `Ok(impl Iterator<Item = &Path>)` - Iterator over entries of immediate children
     ///   (relative to VFS root). The yielded paths are *inside* the target directory
     ///   but do not include deeper nesting.
     /// * `Err(anyhow::Error)` - If the specified path does not exist in VFS.
@@ -357,7 +357,7 @@ impl FsBackend for DirFS {
     /// fs.mkdir("/docs/subdir");
     /// fs.mkfile("/docs/document.txt", None);
     ///
-    /// // List current directory contents
+    /// // List root contents
     /// for entry in fs.ls("/").unwrap() {
     ///     println!("{:?}", entry);
     /// }
@@ -406,7 +406,7 @@ impl FsBackend for DirFS {
     /// * `path` - path to the directory to traverse (must exist in VFS).
     ///
     /// # Returns
-    /// * `Ok(impl Iterator<Item = DirEntry>)` - Iterator over all entries *within* the tree
+    /// * `Ok(impl Iterator<Item = &Path>)` - Iterator over all entries *within* the tree
     ///   (relative to VFS root), excluding the root of the traversal.
     /// * `Err(anyhow::Error)` - If:
     ///   - The specified path does not exist in VFS.
@@ -442,7 +442,7 @@ impl FsBackend for DirFS {
     /// - The iterator borrows data from VFS. The returned iterator is valid as long
     ///   as `self` is alive.
     /// - Symbolic links are treated as regular entries (no follow/resolve).
-    /// - Use `Path` methods (e.g., `is_file()`, `is_dir()`) on yielded items for type checks.
+    /// - Use `DirFS` methods (e.g., `is_file()`, `is_dir()`) for yielded items for type checks.
     fn tree<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>> {
         let inner_path = self.to_inner(path);
         if !self.exists(&inner_path) {
@@ -501,9 +501,9 @@ impl FsBackend for DirFS {
         Ok(())
     }
 
-    /// Creates new file in vfs.
-    /// * `file_path` must be inner vfs path. It must contain the name of the file,
-    /// optionally preceded by existing parent directory.
+    /// Creates new file in VFS.
+    /// * `file_path` must be inner VFS path. It must contain the name of the file,
+    /// optionally preceded by parent directory.
     /// If the parent directory does not exist, it will be created.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()> {
         let file_path = self.to_inner(file_path);
@@ -538,15 +538,9 @@ impl FsBackend for DirFS {
     /// - Returns an empty vector for empty files.
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
         let inner = self.to_inner(&path);
-        if !self.exists(&inner) {
-            return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
+        if self.is_dir(&inner)? {   // checks for existent too
+            return Err(anyhow!("{} is a directory", path.as_ref().display()));
         }
-        if let Some(entry) = self.entries.get(&inner) {
-            if entry.is_dir() {
-                return Err(anyhow!("{} is a directory", inner.display()));
-            }
-        }
-
         let mut content = Vec::new();
         let host = self.to_host(&inner)?;
         std::fs::File::open(&host)?.read_to_end(&mut content)?;
@@ -573,15 +567,9 @@ impl FsBackend for DirFS {
     /// - **Permissions**: The file retains its original permissions (no chmod is performed).
     fn write<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
-        if !self.exists(&inner) {
-            return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
+        if self.is_dir(&inner)? {   // checks for existent too
+            return Err(anyhow!("{} is a directory", path.as_ref().display()));
         }
-        if let Some(entry) = self.entries.get(&inner) {
-            if entry.is_dir() {
-                return Err(anyhow!("{} is a directory", inner.display()));
-            }
-        }
-
         let host = self.to_host(&inner)?;
         std::fs::write(&host, content)?;
 
@@ -604,20 +592,13 @@ impl FsBackend for DirFS {
     ///
     /// # Behavior
     /// - **Appends only**: Existing content is preserved; new bytes are added at the end.
-    /// - **No parent creation**: Parent directories must exist (use `mkdir()` first if needed).
     /// - **File creation**: Does NOT create the file if it doesn't exist (returns error).
     /// - **Permissions**: The file retains its original permissions.
     fn append<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
-        if !self.exists(&inner) {
-            return Err(anyhow!("file does not exist: {}", path.as_ref().display()));
+        if self.is_dir(&inner)? {   // checks for existent too
+            return Err(anyhow!("{} is a directory", path.as_ref().display()));
         }
-        if let Some(entry) = self.entries.get(&inner) {
-            if entry.is_dir() {
-                return Err(anyhow!("{} is a directory", inner.display()));
-            }
-        }
-
         // Open file in append mode and write content
         use std::fs::OpenOptions;
         let host = self.to_host(&inner)?;
@@ -2037,7 +2018,7 @@ mod tests {
                 result
                     .unwrap_err()
                     .to_string()
-                    .contains("file does not exist: /not/found.txt")
+                    .contains("does not exist")
             );
 
             Ok(())
@@ -2206,7 +2187,7 @@ mod tests {
                 result
                     .unwrap_err()
                     .to_string()
-                    .contains("file does not exist")
+                    .contains("does not exist")
             );
 
             Ok(())
@@ -2299,7 +2280,7 @@ mod tests {
                 result
                     .unwrap_err()
                     .to_string()
-                    .contains("file does not exist: /not_found.txt")
+                    .contains("does not exist")
             );
 
             Ok(())
