@@ -84,10 +84,14 @@ impl MapFS {
     /// Creates new MapFS instance.
     /// By default, the root directory and current working directory are set to `/`.
     pub fn new() -> Self {
+        let inner_root = PathBuf::from("/");
+        let mut entries = BTreeMap::new();
+        entries.insert(inner_root.clone(), Entry::new(EntryType::Directory));
+
         Self {
             root: PathBuf::from("/"),
             cwd: PathBuf::from("/"),
-            entries: BTreeMap::new(),
+            entries,
         }
     }
 
@@ -131,8 +135,8 @@ impl FsBackend for MapFS {
     /// An error is returned if the specified `path` does not exist.
     fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let target = self.to_inner(path);
-        if !self.exists(&target) {
-            return Err(anyhow!("{} does not exist", target.display()));
+        if !self.is_dir(&target)? {
+            return Err(anyhow!("{} not a directory", target.display()));
         }
         self.cwd = target;
         Ok(())
@@ -473,7 +477,6 @@ impl FsBackend for MapFS {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +498,142 @@ mod tests {
 
             let result = fs.set_root("new/relative/root");
             assert!(result.is_err());
+        }
+    }
+
+    mod cd {
+        use super::*;
+
+        /// Helper function to set up a test VFS with a predefined structure
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new(); // Assume MapFS has a new() constructor
+
+            // Create a sample directory structure
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkfile("/home/user/config.txt", Some(b"Config content")).unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_cd_absolute_path_success() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            assert_eq!(vfs.cwd, Path::new("/")); // Initial CWD is root
+
+            vfs.cd("/home/user")?;
+
+            assert_eq!(vfs.cwd, Path::new("/home/user"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_relative_path_success() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            vfs.cd("/home")?; // Change to /home first
+            assert_eq!(vfs.cwd, Path::new("/home"));
+
+            vfs.cd("user")?; // Relative path from current CWD
+
+            assert_eq!(vfs.cwd, Path::new("/home/user"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_root_directory() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            vfs.cd("/")?;
+
+            assert_eq!(vfs.cwd, Path::new("/"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_nonexistent_path_error() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            let result = vfs.cd("/nonexistent/path");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error message should indicate path does not exist"
+            );
+
+            // CWD should remain unchanged
+            assert_eq!(vfs.cwd, Path::new("/"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_file_path_error() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            let result = vfs.cd("/home/user/config.txt");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("not a directory"),
+                "Even though the file exists, cd() should fail because it's not a directory"
+            );
+
+            // CWD should remain unchanged
+            assert_eq!(vfs.cwd, Path::new("/"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_same_directory() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            vfs.cd("/home")?;
+            assert_eq!(vfs.cwd, Path::new("/home"));
+
+            vfs.cd("/home")?; // CD to same directory
+
+            assert_eq!(vfs.cwd, Path::new("/home")); // Should remain unchanged
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_deep_nested_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            vfs.cd("/home/user")?;
+
+            assert_eq!(vfs.cwd, Path::new("/home/user"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_sequential_changes() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            vfs.cd("/etc")?;
+            assert_eq!(vfs.cwd, Path::new("/etc"));
+
+            vfs.cd("/home")?;
+            assert_eq!(vfs.cwd, Path::new("/home"));
+
+            vfs.cd("/")?;
+            assert_eq!(vfs.cwd, Path::new("/"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_cd_with_trailing_slash() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            // Test that trailing slash is handled correctly
+            vfs.cd("/home/")?;
+            assert_eq!(vfs.cwd, Path::new("/home"));
+
+            vfs.cd("/home/user//")?;
+            assert_eq!(vfs.cwd, Path::new("/home/user"));
+            Ok(())
         }
     }
 }

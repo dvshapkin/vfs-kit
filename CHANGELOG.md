@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 + `ls()` and `tree()` - the item type in the iterator is now `&Path`
 
 ### Fixed
+- `cd()` - returns error now if target path is a file
 - Inaccuracies in the documentation have been corrected
 
 ## [0.1.13] - 2026-02-13

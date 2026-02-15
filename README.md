@@ -35,6 +35,7 @@ cargo add vfs-kit
 ### Changed
 + `ls()` and `tree()` - the item type in the iterator is now `&Path`
 ### Fixed
+- `cd()` - returns error now if target path is a file
 - Inaccuracies in the documentation have been corrected
 
 

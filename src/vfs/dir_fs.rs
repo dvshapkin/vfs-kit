@@ -302,8 +302,8 @@ impl FsBackend for DirFS {
     /// An error is returned if the specified `path` does not exist.
     fn cd<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let target = self.to_inner(path);
-        if !self.exists(&target) {
-            return Err(anyhow!("{} does not exist", target.display()));
+        if !self.is_dir(&target)? {
+            return Err(anyhow!("{} not a directory", target.display()));
         }
         self.cwd = target;
         Ok(())
@@ -899,6 +899,24 @@ mod tests {
             fs.mkdir("/home/other").unwrap();
             fs.cd("./other").unwrap();
             assert_eq!(fs.cwd(), Path::new("/home/other"));
+        }
+
+        #[test]
+        fn test_cd_file_path_error() -> Result<()> {
+            let temp_dir = setup_test_env();
+            let mut vfs = DirFS::new(&temp_dir).unwrap();
+
+            vfs.mkfile("/home/user/config.txt", None).unwrap();
+            let result = vfs.cd("/home/user/config.txt");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("not a directory"),
+                "Even though the file exists, cd() should fail because it's not a directory"
+            );
+
+            // CWD should remain unchanged
+            assert_eq!(vfs.cwd, Path::new("/"));
+            Ok(())
         }
     }
 
