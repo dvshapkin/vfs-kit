@@ -193,13 +193,6 @@ fs.forget("/file.02")                        // remove the file from VFS control
 ## Planned Features
 
 We’re working on these backends:
-* `MapFS`
-  + In‑memory filesystem using Map.
-  + Ideal for testing and transient data.
-  + No disk I/O; fully deterministic.
-  + Great for mocking file content in tests.
-
-
 * `LogFS`
   + Append‑only log‑structured filesystem.
   + Persists operations as a sequence of atomic log entries.
