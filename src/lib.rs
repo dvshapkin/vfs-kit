@@ -1,9 +1,9 @@
 //! A lightweight, extensible set of virtual file systems (VFS) for Rust.
 //! Provides abstractions over real or pseudo-file systems. Ideal for testing,
 //! isolated sandboxing, custom storage backends, and more.
-//! 
+//!
 //! ### Overview
-//! 
+//!
 //! `vfs-kit` allows you to work with filesystem-like structures in Rust without touching the actual disk (unless you want to).
 //! It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS`, which map to actual directories.
 //!
@@ -17,5 +17,5 @@
 mod core;
 mod vfs;
 
-pub use core::{Result, FsBackend};
-pub use vfs::{DirFS, MapFS, Entry, EntryType};
+pub use core::{FsBackend, Result};
+pub use vfs::{DirFS, Entry, EntryType, MapFS};

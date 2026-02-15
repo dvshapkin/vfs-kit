@@ -40,7 +40,7 @@ impl Entry {
 
     pub fn append_content(&mut self, content: &[u8]) {
         let mut new_content = if self.content.is_some() {
-             self.content.take().unwrap()
+            self.content.take().unwrap()
         } else {
             Vec::new()
         };

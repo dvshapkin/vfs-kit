@@ -360,7 +360,8 @@ impl FsBackend for MapFS {
     /// - Returns an empty vector for empty files.
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
         let path = path.as_ref();
-        if self.is_dir(path)? {     // checks for existent too
+        if self.is_dir(path)? {
+            // checks for existent too
             return Err(anyhow!("{} is a directory", path.display()));
         }
         Ok(self.entries[path].content().cloned().unwrap_or(Vec::new()))
@@ -381,10 +382,11 @@ impl FsBackend for MapFS {
     /// - **No file creation**: File must exist (use `mkfile()` first).
     fn write<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let path = path.as_ref();
-        if self.is_dir(path)? {     // checks for existent too
+        if self.is_dir(path)? {
+            // checks for existent too
             return Err(anyhow!("{} is a directory", path.display()));
         }
-        self.entries.get_mut(path).unwrap().set_content(content);   // safe unwrap()
+        self.entries.get_mut(path).unwrap().set_content(content); // safe unwrap()
         Ok(())
     }
 
@@ -405,10 +407,11 @@ impl FsBackend for MapFS {
     /// - **File creation**: Does NOT create the file if it doesn't exist (returns error).
     fn append<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let path = path.as_ref();
-        if self.is_dir(path)? {     // checks for existent too
+        if self.is_dir(path)? {
+            // checks for existent too
             return Err(anyhow!("{} is a directory", path.display()));
         }
-        self.entries.get_mut(path).unwrap().append_content(content);   // safe unwrap()
+        self.entries.get_mut(path).unwrap().append_content(content); // safe unwrap()
         Ok(())
     }
 

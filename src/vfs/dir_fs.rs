@@ -10,10 +10,11 @@
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
-use anyhow::anyhow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+use anyhow::anyhow;
 
 use crate::core::{FsBackend, Result, utils};
 use crate::{Entry, EntryType};
@@ -85,10 +86,7 @@ impl DirFS {
 
         let inner_root = PathBuf::from("/");
         let mut entries = BTreeMap::new();
-        entries.insert(
-            inner_root.clone(),
-            Entry::new(EntryType::Directory),
-        );
+        entries.insert(inner_root.clone(), Entry::new(EntryType::Directory));
 
         Ok(Self {
             root,
@@ -264,7 +262,8 @@ impl DirFS {
         } else {
             EntryType::File
         };
-        self.entries.insert(inner_path.to_path_buf(), Entry::new(entry_type));
+        self.entries
+            .insert(inner_path.to_path_buf(), Entry::new(entry_type));
 
         if host_path.is_dir() {
             for entry in std::fs::read_dir(host_path)? {
@@ -452,9 +451,7 @@ impl FsBackend for DirFS {
             .entries
             .iter()
             .map(|(pb, _)| pb.as_path())
-            .filter(move |&path| {
-                path.starts_with(&inner_path) && path != inner_path
-            }))
+            .filter(move |&path| path.starts_with(&inner_path) && path != inner_path))
     }
 
     /// Creates directory and all it parents (if needed).
@@ -538,7 +535,8 @@ impl FsBackend for DirFS {
     /// - Returns an empty vector for empty files.
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
         let inner = self.to_inner(&path);
-        if self.is_dir(&inner)? {   // checks for existent too
+        if self.is_dir(&inner)? {
+            // checks for existent too
             return Err(anyhow!("{} is a directory", path.as_ref().display()));
         }
         let mut content = Vec::new();
@@ -567,7 +565,8 @@ impl FsBackend for DirFS {
     /// - **Permissions**: The file retains its original permissions (no chmod is performed).
     fn write<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
-        if self.is_dir(&inner)? {   // checks for existent too
+        if self.is_dir(&inner)? {
+            // checks for existent too
             return Err(anyhow!("{} is a directory", path.as_ref().display()));
         }
         let host = self.to_host(&inner)?;
@@ -596,7 +595,8 @@ impl FsBackend for DirFS {
     /// - **Permissions**: The file retains its original permissions.
     fn append<P: AsRef<Path>>(&mut self, path: P, content: &[u8]) -> Result<()> {
         let inner = self.to_inner(&path);
-        if self.is_dir(&inner)? {   // checks for existent too
+        if self.is_dir(&inner)? {
+            // checks for existent too
             return Err(anyhow!("{} is a directory", path.as_ref().display()));
         }
         // Open file in append mode and write content
@@ -1147,11 +1147,7 @@ mod tests {
 
             let entries: Vec<_> = fs.ls(fs.cwd())?.collect();
             assert_eq!(entries.len(), 1, "Should return exactly one file");
-            assert_eq!(
-                entries[0],
-                Path::new("/file.txt"),
-                "File path should match"
-            );
+            assert_eq!(entries[0], Path::new("/file.txt"), "File path should match");
 
             Ok(())
         }
@@ -1452,10 +1448,7 @@ mod tests {
 
             let entries: Vec<_> = fs.tree("sub")?.collect();
             assert_eq!(entries.len(), 1);
-            assert_eq!(
-                entries[0],
-                PathBuf::from("/docs/sub/file.txt")
-            );
+            assert_eq!(entries[0], PathBuf::from("/docs/sub/file.txt"));
 
             Ok(())
         }
@@ -1491,11 +1484,7 @@ mod tests {
             let entries: Vec<_> = fs.tree("/parent")?.collect();
 
             // Should not include /parent itself, only its contents
-            assert!(
-                !entries
-                    .iter()
-                    .any(|&p| p == &PathBuf::from("/parent"))
-            );
+            assert!(!entries.iter().any(|&p| p == &PathBuf::from("/parent")));
             assert!(
                 entries
                     .iter()
@@ -2014,12 +2003,7 @@ mod tests {
 
             let result = fs.read("/not/found.txt");
             assert!(result.is_err());
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("does not exist")
-            );
+            assert!(result.unwrap_err().to_string().contains("does not exist"));
 
             Ok(())
         }
@@ -2183,12 +2167,7 @@ mod tests {
 
             let result = fs.write("/parent/child.txt", b"Content");
             assert!(result.is_err());
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("does not exist")
-            );
+            assert!(result.unwrap_err().to_string().contains("does not exist"));
 
             Ok(())
         }
@@ -2276,12 +2255,7 @@ mod tests {
 
             let result = fs.append("/not_found.txt", b"Content");
             assert!(result.is_err());
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("does not exist")
-            );
+            assert!(result.unwrap_err().to_string().contains("does not exist"));
 
             Ok(())
         }

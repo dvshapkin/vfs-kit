@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use anyhow;
+use std::path::{Path, PathBuf};
 
 /// FsBackend defines a common API for all virtual file systems (vfs) in the crate.
 /// Some functions here use `path` as a parameter or return value.
@@ -29,7 +29,7 @@ pub trait FsBackend {
 
     /// Checks if `path` is a regular file.
     fn is_file<P: AsRef<Path>>(&self, path: P) -> Result<bool>;
-    
+
     /// Returns an iterator over directory entries.
     /// `path` is a directory, or CWD if None.
     fn ls<P: AsRef<Path>>(&self, path: P) -> Result<impl Iterator<Item = &Path>>;
@@ -42,7 +42,7 @@ pub trait FsBackend {
 
     /// Creates new file in vfs.
     fn mkfile<P: AsRef<Path>>(&mut self, file_path: P, content: Option<&[u8]>) -> Result<()>;
-    
+
     /// Reads the entire contents of a file into a byte vector.
     fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>>;
 
@@ -62,8 +62,8 @@ pub trait FsBackend {
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
 
 pub mod utils {
-    use std::path::{Component, Path, PathBuf};
     use super::Result;
+    use std::path::{Component, Path, PathBuf};
 
     /// Normalizes an arbitrary `path` by processing all occurrences
     /// of '.' and '..' elements. Also, removes final `/`.
