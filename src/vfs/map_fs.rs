@@ -217,14 +217,19 @@ impl FsBackend for MapFS {
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
         }
-        let component_count = inner_path.components().count() + 1;
+        let is_file =  self.is_file(&inner_path)?;
+        let component_count = if is_file {
+            inner_path.components().count()
+        } else {
+            inner_path.components().count() + 1
+        };
         Ok(self
             .entries
             .iter()
             .map(|(pb, _)| pb.as_path())
             .filter(move |&path| {
                 path.starts_with(&inner_path)
-                    && path != inner_path
+                    && (path != inner_path || is_file)
                     && path.components().count() == component_count
             }))
     }
@@ -924,6 +929,174 @@ mod tests {
 
     mod ls {
         use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create a sample hierarchy
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkdir("/home/guest").unwrap();
+            vfs.mkfile("/home/user/file1.txt", Some(b"Content 1")).unwrap();
+        vfs.mkfile("/home/user/file2.txt", Some(b"Content 2")).unwrap();
+            vfs.mkfile("/home/guest/note.txt", Some(b"Note")).unwrap();
+        vfs.mkfile("/readme.md", Some(b"Docs")).unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_ls_root_directory() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.ls("/")?.collect();
+
+            assert_eq!(entries.len(), 3);
+            assert!(entries.contains(&Path::new("/etc")));
+            assert!(entries.contains(&Path::new("/home")));
+            assert!(entries.contains(&Path::new("/readme.md")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_home_directory() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.ls("/home")?.collect();
+
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains(&Path::new("/home/user")));
+            assert!(entries.contains(&Path::new("/home/guest")));
+
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_user_directory() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.ls("/home/user")?.collect();
+
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/file2.txt")));
+
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_nonexistent_path() {
+            let vfs = setup_test_vfs();
+            let result: Result<Vec<_>> = vfs.ls("/nonexistent").map(|iter| iter.collect());
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error should mention path does not exist"
+            );
+        }
+
+        #[test]
+        fn test_ls_file_path() {
+            let vfs = setup_test_vfs();
+            let result: Result<Vec<_>> = vfs.ls("/home/user/file1.txt").map(|iter| iter.collect());
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), vec!["/home/user/file1.txt"]);
+        }
+
+        #[test]
+        fn test_ls_empty_directory() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.mkdir("/empty_dir").unwrap(); // Create empty dir
+
+            let entries: Vec<_> = vfs.ls("/empty_dir")?.collect();
+            assert_eq!(entries.len(), 0); // Should return empty iterator
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_relative_path_from_root() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries: Vec<_> = vfs.ls("home")?.collect(); // Relative path
+
+
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains(&Path::new("/home/user")));
+            assert!(entries.contains(&Path::new("/home/guest")));
+
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_relative_path_nested() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home").unwrap();
+
+            let entries: Vec<_> = vfs.ls("user")?.collect();
+
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/file2.txt")));
+
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_with_trailing_slash() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let entries1: Vec<_> = vfs.ls("/home/")?.collect();   // With slash
+            let entries2: Vec<_> = vfs.ls("/home")?.collect();    // Without slash
+
+
+            assert_eq!(entries1, entries2); // Results should be identical
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap();
+
+            let entries: Vec<_> = vfs.ls(".")?.collect();
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains(&Path::new("/home/user/file1.txt")));
+            assert!(entries.contains(&Path::new("/home/user/file2.txt")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_double_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap();
+
+            let entries: Vec<_> = vfs.ls("..")?.collect(); // Parent directory
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains(&Path::new("/home/user")));
+            assert!(entries.contains(&Path::new("/home/guest")));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_ls_iterator_lazy_evaluation() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let mut iter = vfs.ls("/home/user")?;
+
+            // Test that iterator doesn't panic on immediate creation
+            assert!(iter.next().is_some());
+
+            // Consume all items
+            let count = iter.count();
+            assert_eq!(count + 1, 2); // +1 because we already took one with next()
+
+
+            Ok(())
+        }
     }
 
     mod tree {

@@ -384,14 +384,19 @@ impl FsBackend for DirFS {
         if !self.exists(&inner_path) {
             return Err(anyhow!("{} does not exist", inner_path.display()));
         }
-        let component_count = inner_path.components().count() + 1;
+        let is_file =  self.is_file(&inner_path)?;
+        let component_count = if is_file {
+            inner_path.components().count()
+        } else {
+            inner_path.components().count() + 1
+        };
         Ok(self
             .entries
             .iter()
             .map(|(pb, _)| pb.as_path())
             .filter(move |&path| {
                 path.starts_with(&inner_path)
-                    && path != inner_path
+                    && (path != inner_path || is_file)
                     && path.components().count() == component_count
             }))
     }
