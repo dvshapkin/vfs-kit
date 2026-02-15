@@ -123,7 +123,7 @@ impl FsBackend for MapFS {
     /// * `inner_path` must exist in VFS
     fn to_host<P: AsRef<Path>>(&self, inner_path: P) -> Result<PathBuf> {
         let inner = self.to_inner(inner_path);
-        Ok(self.root.join(inner.strip_prefix("/").unwrap()))
+        Ok(self.root.join(inner.strip_prefix("/")?))
     }
 
     /// Changes the current working directory.
@@ -470,5 +470,31 @@ impl FsBackend for MapFS {
         }
 
         true
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod creations {
+        use super::*;
+
+        #[test]
+        fn test_new_map_fs() {
+            let mut fs = MapFS::new();
+            assert_eq!(fs.root(), "/");
+            assert_eq!(fs.cwd(), "/");
+
+            fs.set_root("/new/root").unwrap();
+            assert_eq!(fs.root(), "/new/root");
+
+            let host_path = fs.to_host("/inner/path").unwrap();
+            assert_eq!(host_path.as_path(), "/new/root/inner/path");
+
+            let result = fs.set_root("new/relative/root");
+            assert!(result.is_err());
+        }
     }
 }

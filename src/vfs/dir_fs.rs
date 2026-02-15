@@ -294,7 +294,7 @@ impl FsBackend for DirFS {
     /// * `inner_path` must exist in VFS
     fn to_host<P: AsRef<Path>>(&self, inner_path: P) -> Result<PathBuf> {
         let inner = self.to_inner(inner_path);
-        Ok(self.root.join(inner.strip_prefix("/").unwrap()))
+        Ok(self.root.join(inner.strip_prefix("/")?))
     }
 
     /// Changes the current working directory.
