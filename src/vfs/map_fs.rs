@@ -1574,10 +1574,7 @@ mod tests {
             let result = vfs.read("/nonexistent.txt");
             assert!(result.is_err());
             assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("does not exist"),
+                result.unwrap_err().to_string().contains("does not exist"),
                 "Error should mention file does not exist"
             );
         }
@@ -1629,10 +1626,7 @@ mod tests {
             let result = vfs.write("/newfile.txt", b"Content");
             assert!(result.is_err());
             assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("does not exist"),
+                result.unwrap_err().to_string().contains("does not exist"),
                 "Writing to nonexistent file should fail"
             );
         }
@@ -1684,10 +1678,7 @@ mod tests {
             let result = vfs.append("/newfile.txt", b"More content");
             assert!(result.is_err());
             assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("does not exist"),
+                result.unwrap_err().to_string().contains("does not exist"),
                 "Appending to nonexistent file should fail"
             );
         }
@@ -1742,6 +1733,193 @@ mod tests {
 
     mod rm {
         use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create a sample hierarchy with files and nested directories
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkdir("/home/user/projects").unwrap();
+            vfs.mkfile("/home/user/file1.txt", Some(b"Content 1"))
+                .unwrap();
+            vfs.mkfile("/home/user/projects/proj1.rs", Some(b"Code 1"))
+                .unwrap();
+            vfs.mkfile("/readme.md", Some(b"Docs")).unwrap();
+            vfs.mkfile("/data.bin", Some(b"\x00\x01")).unwrap();
+
+            vfs
+        }
+
+        #[test]
+        fn test_rm_file() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.rm("/readme.md")?;
+
+            assert!(!vfs.exists("/readme.md"));
+            assert!(vfs.exists("/data.bin")); // Other files untouched
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_directory_recursive() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.rm("/home/user")?;
+
+            // Entire subtree should be gone
+            assert!(!vfs.exists("/home/user"));
+            assert!(!vfs.exists("/home/user/file1.txt"));
+            assert!(!vfs.exists("/home/user/projects"));
+            assert!(!vfs.exists("/home/user/projects/proj1.rs"));
+
+            // Sibling directories remain
+            assert!(vfs.exists("/home"));
+            assert!(vfs.exists("/etc"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_nonexistent_path() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.rm("/nonexistent");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Should error for non‑existent path"
+            );
+        }
+
+        #[test]
+        fn test_rm_empty_path() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.rm("");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("invalid path: empty"),
+                "Empty path should be rejected"
+            );
+        }
+
+        #[test]
+        fn test_rm_root_directory() {
+            let mut vfs = setup_test_vfs();
+            let result = vfs.rm("/");
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("invalid path: the root cannot be removed"),
+                "Root directory cannot be removed"
+            );
+        }
+
+        #[test]
+        fn test_rm_with_trailing_slash() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.rm("/etc/")?; // Trailing slash
+
+            assert!(!vfs.exists("/etc"));
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_relative_path_from_root() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home").unwrap(); // Change CWD to /home
+
+            vfs.rm("user")?; // Relative path
+
+            assert!(!vfs.exists("/home/user"));
+            assert!(vfs.exists("/etc")); // Unrelated paths intact
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_relative_path_nested() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user/projects").unwrap();
+
+            vfs.rm("../file1.txt")?; // Go up and remove sibling
+
+            assert!(!vfs.exists("/home/user/file1.txt"));
+            assert!(vfs.exists("/home/user/projects/proj1.rs")); // Project files intact
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user")?;
+
+            let result = vfs.rm(".");
+            assert!(result.is_ok());
+            assert!(!vfs.exists("/home/user"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_double_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user/projects").unwrap();
+
+            let result = vfs.rm("..");
+            assert!(result.is_ok());
+            assert!(!vfs.exists("/home/user"));
+            assert!(vfs.exists("/home"));
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_single_file_in_dir() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.rm("/home/user/file1.txt")?;
+
+            assert!(!vfs.exists("/home/user/file1.txt"));
+            assert!(vfs.exists("/home/user/projects/proj1.rs")); // Other files remain
+            assert!(vfs.exists("/home/user")); // Directory still exists
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_idempotent() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+
+            // First removal succeeds
+            vfs.rm("/data.bin")?;
+
+            // Second removal should fail (already gone)
+            let result = vfs.rm("/data.bin");
+            assert!(result.is_err());
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_rm_case_sensitivity() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.mkdir("/CaseDir").unwrap();
+            vfs.mkfile("/CaseDir/file.txt", Some(b"Content")).unwrap();
+
+            vfs.rm("/CaseDir")?; // Correct case
+
+            assert!(!vfs.exists("/CaseDir"));
+            assert!(!vfs.exists("/casedir")); // Case‑sensitive check
+
+            Ok(())
+        }
     }
 
     mod cleanup {
