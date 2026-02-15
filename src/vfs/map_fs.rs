@@ -749,4 +749,200 @@ mod tests {
             assert!(vfs.exists("../../etc"));   // Up two levels
         }
     }
+
+    mod is_dir_file {
+        use super::*;
+
+        /// Helper to create a pre‑populated MapFS instance for testing
+        fn setup_test_vfs() -> MapFS {
+            let mut vfs = MapFS::new();
+
+            // Create a sample hierarchy
+            vfs.mkdir("/etc").unwrap();
+            vfs.mkdir("/home").unwrap();
+            vfs.mkdir("/home/user").unwrap();
+            vfs.mkfile("/home/user/file.txt", Some(b"Hello")).unwrap();
+        vfs.mkfile("/readme.md", Some(b"Project docs")).unwrap();
+            vfs.mkfile("/empty.bin", None).unwrap(); // Empty file
+
+            vfs
+        }
+
+        #[test]
+        fn test_is_dir_existing_directory_absolute() -> Result<()> {
+            let vfs = setup_test_vfs();
+            assert!(vfs.is_dir("/home")?);
+            assert!(vfs.is_dir("/home/user")?);
+            assert!(vfs.is_dir("/")?); // Root
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_existing_directory_relative() -> Result<()> {
+            let vfs = setup_test_vfs();
+            // From root
+            assert!(vfs.is_dir("home")?);
+            // After changing CWD
+            let mut vfs2 = setup_test_vfs();
+            vfs2.cd("/home").unwrap();
+            assert!(vfs2.is_dir("user")?);
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_file_path() -> Result<()> {
+            let vfs = setup_test_vfs();
+            assert!(!vfs.is_dir("/home/user/file.txt")?);
+            assert!(!vfs.is_dir("/readme.md")?);
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_nonexistent_path() {
+            let vfs = setup_test_vfs();
+            let result = vfs.is_dir("/nonexistent");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error should mention path does not exist"
+            );
+        }
+
+        #[test]
+        fn test_is_file_existing_file_absolute() -> Result<()> {
+            let vfs = setup_test_vfs();
+            assert!(vfs.is_file("/home/user/file.txt")?);
+            assert!(vfs.is_file("/readme.md")?);
+            assert!(vfs.is_file("/empty.bin")?); // Empty file is still a file
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_existing_file_relative() -> Result<()> {
+            let vfs = setup_test_vfs();
+            // From root
+            assert!(vfs.is_file("readme.md")?);
+            // After changing CWD
+            let mut vfs2 = setup_test_vfs();
+            vfs2.cd("/home/user").unwrap();
+            assert!(vfs2.is_file("file.txt")?);
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_directory_path() -> Result<()> {
+            let vfs = setup_test_vfs();
+            assert!(!vfs.is_file("/home")?);
+            assert!(!vfs.is_file("/home/user")?);
+            assert!(!vfs.is_file("/")?); // Root is a directory
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_nonexistent_path() {
+            let vfs = setup_test_vfs();
+            let result = vfs.is_file("/nonexistent.txt");
+            assert!(result.is_err());
+            assert!(
+                result.unwrap_err().to_string().contains("does not exist"),
+                "Error should mention path does not exist"
+            );
+        }
+
+        #[test]
+        fn test_is_dir_and_is_file_on_same_file() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let file_path = "/home/user/file.txt";
+
+            assert!(!vfs.is_dir(file_path)?);  // Not a directory
+            assert!(vfs.is_file(file_path)?);   // Is a file
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_and_is_file_on_same_directory() -> Result<()> {
+            let vfs = setup_test_vfs();
+            let dir_path = "/home/user";
+
+            assert!(vfs.is_dir(dir_path)?);     // Is a directory
+            assert!(!vfs.is_file(dir_path)?); // Not a file
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_with_trailing_slash() -> Result<()> {
+            let vfs = setup_test_vfs();
+            assert!(vfs.is_dir("/home/")?);      // Trailing slash
+            assert!(vfs.is_dir("/home/user/")?);
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_with_trailing_slash() -> Result<()> {
+            let vfs = setup_test_vfs();
+            // Even with trailing slash, it should still be recognized as a file
+            assert!(vfs.is_file("/readme.md/")?);
+            assert!(vfs.is_file("/home/user/file.txt/")?);
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home").unwrap();
+
+            assert!(vfs.is_dir(".")?);    // Current directory
+            assert!(vfs.is_dir("./user")?); // Subdirectory
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_file_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap();
+
+            assert!(vfs.is_file("./file.txt")?);
+            Ok(())
+        }
+
+        #[test]
+        fn test_is_dir_double_dot_path() -> Result<()> {
+            let mut vfs = setup_test_vfs();
+            vfs.cd("/home/user").unwrap();
+
+            assert!(vfs.is_dir("..")?);       // Parent (/home)
+
+            let result = vfs.is_dir("../etc");
+            assert!(result.is_err());  // Sibling directory (not existed)
+            // Note: ../etc doesn't exist in our setup, so this would fail
+            // But .. itself should pass
+            Ok(())
+        }
+    }
+
+    mod ls {
+        use super::*;
+    }
+
+    mod tree {
+        use super::*;
+    }
+
+    mod mkdir_mkfile {
+        use super::*;
+    }
+
+    mod read_write_append {
+        use super::*;
+    }
+
+    mod rm {
+        use super::*;
+    }
+
+    mod cleanup {
+        use super::*;
+    }
 }
