@@ -480,11 +480,22 @@ mod tests {
             assert_eq!(fs.root(), "/");
             assert_eq!(fs.cwd(), "/");
 
-            fs.set_root("/new/root").unwrap();
-            assert_eq!(fs.root(), "/new/root");
+            #[cfg(unix)]
+            {
+                fs.set_root("/new/root").unwrap();
+                assert_eq!(fs.root(), "/new/root");
 
-            let host_path = fs.to_host("/inner/path").unwrap();
-            assert_eq!(host_path.as_path(), "/new/root/inner/path");
+                let host_path = fs.to_host("/inner/path").unwrap();
+                assert_eq!(host_path.as_path(), "/new/root/inner/path");
+            }
+            #[cfg(windows)]
+            {
+                fs.set_root("c:\\new\\root").unwrap();
+                assert_eq!(fs.root(), "c:\\new\\root");
+
+                let host_path = fs.to_host("\\inner\\path").unwrap();
+                assert_eq!(host_path.as_path(), "c:\\new\\root\\inner\\path");
+            }
 
             let result = fs.set_root("new/relative/root");
             assert!(result.is_err());
