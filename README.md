@@ -43,7 +43,8 @@ cargo add vfs-kit
 ## Overview
 
 `vfs-kit` allows you to work with filesystem-like structures in Rust without touching the actual disk (unless you want to). 
-It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS`, which map to actual directories.
+It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS` (which maps to real directories)
+and `MapFS`.
 
 **Key ideas**:
 - **Abstraction**: Work with different types of storage (real directories, memory cards, etc.) through a single API.
@@ -161,6 +162,33 @@ fs.forget("/file.02")                        // remove the file from VFS control
 + Remove individual files or entire directories with `rm()`
 + Iterate over directory contents with `ls()` and recursively with `tree()`
 + Clean the VFS with `cleanup()`
+
+## What's different about `MapFS`?
+`MapFS` doesn't work with the host filesystem at all (unlike `DirFS`). Instead of actual files and directories, 
+pseudo-files and pseudo-directories are created, but the same API defined in `FsBackend` applies to them.
+This means you can create directories and files, write contents to them, read from files, and so on. Since all 
+the artifacts you create will be stored in RAM, `MapFS` isn't suitable for creating too many of them. 
+This can slow down your application and the system as a whole. If you need a large number of files and/or directories, 
+it's better to use `DirFS`.
+
+### Optimal use scenarios
++ temporary data storage within a single process;
++ unit testing of file operations (without affecting the real FS);
++ caching small amounts of data with fast access;
++ prototyping file interactions;
++ working with configurations/templates in memory.
+
+### Comparison with `DirFS`
++ `MapFS`:
+  - speed of operations (memory vs disk);
+  - isolation (does not affect the host FS);
+  - limited by RAM capacity;
+  - data is lost when the process terminates (serialization is planned to be implemented).
++ `DirFS`:
+  - data persistence;
+  - support for large volumes;
+  - slower (I/O to disk);
+  - risk of side effects on the host FS.
 
 ## API Summary
 
