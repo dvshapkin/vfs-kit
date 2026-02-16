@@ -1,6 +1,6 @@
 //! This module provides a virtual filesystem (VFS) implementation that maps to a memory storage.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
@@ -34,10 +34,6 @@ use crate::{Entry, EntryType};
 /// * `entries` — The core storage map that holds all virtual file and directory entries.
 ///   - Key: `PathBuf` representing **inner absolute normalized paths** (always start with `/`).
 ///   - Value: `Entry` struct containing type, metadata, and (for files) content.
-///   - Uses `BTreeMap` for:
-///     - Ordered traversal (natural path hierarchy).
-///     - Efficient prefix‑based queries (e.g., `ls`, `forget`).
-///     - Deterministic iteration.
 ///
 /// ### Invariants
 ///
@@ -50,7 +46,7 @@ use crate::{Entry, EntryType};
 ///
 /// ### Lifecycle
 ///
-/// - On creation: `root` and `cwd` is set to `/`; `entries` contains only the root directory.
+/// - On creation: `root` and `cwd` is set to `/`.
 ///   If you want, you may set `root` to a user‑supplied host path;
 /// - As files/directories are added via methods (e.g., `mkfile()`, `mkdir()`, `add()`), they are
 ///   inserted into `entries` with inner absolute paths.
@@ -84,14 +80,10 @@ impl MapFS {
     /// Creates new MapFS instance.
     /// By default, the root directory and current working directory are set to `/`.
     pub fn new() -> Self {
-        let inner_root = PathBuf::from("/");
-        let mut entries = BTreeMap::new();
-        entries.insert(inner_root.clone(), Entry::new(EntryType::Directory));
-
         Self {
             root: PathBuf::from("/"),
             cwd: PathBuf::from("/"),
-            entries,
+            entries: BTreeMap::new(),
         }
     }
 
@@ -146,7 +138,7 @@ impl FsBackend for MapFS {
     /// The `path` can be in relative or absolute form.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         let inner = self.to_inner(path);
-        self.entries.contains_key(&inner)
+        utils::is_virtual_root(&inner) || self.entries.contains_key(&inner)
     }
 
     /// Checks if `path` is a directory.
@@ -156,7 +148,7 @@ impl FsBackend for MapFS {
         if !self.exists(&inner) {
             return Err(anyhow!("{} does not exist", path.display()));
         }
-        Ok(self.entries[&inner].is_dir())
+        Ok(utils::is_virtual_root(&inner) || self.entries[&inner].is_dir())
     }
 
     /// Checks if `path` is a regular file.
@@ -166,7 +158,7 @@ impl FsBackend for MapFS {
         if !self.exists(&inner) {
             return Err(anyhow!("{} does not exist", path.display()));
         }
-        Ok(self.entries[&inner].is_file())
+        Ok(!utils::is_virtual_root(&inner) && self.entries[&inner].is_file())
     }
 
     /// Returns an iterator over directory entries at a specific depth (shallow listing).
@@ -468,20 +460,9 @@ impl FsBackend for MapFS {
         Ok(())
     }
 
-    /// Removes all artifacts (dirs and files) in vfs, but preserve its root.
+    /// Removes all artifacts (dirs and files) in vfs.
     fn cleanup(&mut self) -> bool {
-        // Collect all paths to delete (except the root "/")
-        let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
-        for (pb, _) in &self.entries {
-            if pb != "/" {
-                sorted_paths_to_remove.insert(pb.clone());
-            }
-        }
-
-        for entry in sorted_paths_to_remove.iter().rev() {
-            self.entries.remove(entry);
-        }
-
+        self.entries.clear();
         true
     }
 }
@@ -1951,12 +1932,7 @@ mod tests {
             let result = vfs.cleanup();
 
             assert!(result); // Should return true on success
-            assert_eq!(vfs.entries.len(), 1); // All entries except root removed
-            assert!(!vfs.exists("/etc"));
-            assert!(!vfs.exists("/home"));
-            assert!(!vfs.exists("/readme.md"));
-            assert!(!vfs.exists("/data.bin"));
-            assert!(!vfs.exists("/empty.txt"));
+            assert_eq!(vfs.entries.len(), 0); // All entries removed
         }
 
         #[test]
@@ -1973,7 +1949,7 @@ mod tests {
             let result = vfs.cleanup();
 
             assert!(result);
-            assert_eq!(vfs.entries.len(), 1);
+            assert_eq!(vfs.entries.len(), 0);
         }
 
         #[test]
@@ -1987,9 +1963,7 @@ mod tests {
             let result = vfs.cleanup();
 
             assert!(result);
-            assert_eq!(vfs.entries.len(), 1);
-            assert!(!vfs.exists("/home/user")); // Should be gone
-            assert!(!vfs.exists("/data.bin")); // Should be gone
+            assert_eq!(vfs.entries.len(), 0);
         }
 
         #[test]
@@ -2002,7 +1976,7 @@ mod tests {
             // Second cleanup on already‑clean VFS
             assert!(vfs.cleanup());
 
-            assert_eq!(vfs.entries.len(), 1);
+            assert_eq!(vfs.entries.len(), 0);
         }
 
         #[test]
@@ -2015,39 +1989,7 @@ mod tests {
 
             vfs.cleanup();
 
-            assert_eq!(vfs.entries.len(), 1);
-            assert!(!vfs.exists("/a/b/c/d/file.txt"));
-            assert!(!vfs.exists("/a"));
-        }
-
-        #[test]
-        fn test_cleanup_order_safety() {
-            let mut vfs = setup_test_vfs();
-
-            // Capture initial paths to verify removal order (via BTreeSet's reverse iteration)
-            let initial_paths: BTreeSet<PathBuf> = vfs
-                .entries
-                .keys()
-                .filter(|&pb| pb != &PathBuf::from("/"))
-                .cloned()
-                .collect();
-
-            vfs.cleanup();
-
-            // Verify all initial non‑root entries were removed
-            for path in &initial_paths {
-                assert!(!vfs.exists(path));
-            }
-
-            // The order is handled by BTreeSet::rev() — we trust the standard library
-            // This test confirms the mechanism works as designed
-        }
-
-        #[test]
-        fn test_cleanup_does_not_panic_on_empty() {
-            let mut vfs = MapFS::new();
-            assert!(vfs.cleanup()); // Should not panic
-            assert_eq!(vfs.entries.len(), 1);
+            assert_eq!(vfs.entries.len(), 0);
         }
 
         #[test]

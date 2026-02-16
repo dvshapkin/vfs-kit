@@ -5,12 +5,11 @@
 //! ### Key Features:
 //! - **Isolated root**: All operations are confined to a designated root directory (self.root).
 //! - **Path normalization**: Automatically resolves . and .. components and removes trailing slashes.
-//! - **State tracking**: Maintains an internal set of valid paths (self.entries) to reflect VFS
-//!   structure.
+//! - **State tracking**: Maintains an internal set of valid paths to reflect VFS structure.
 //! - **Auto‑cleanup**: Optionally removes created artifacts on Drop (when is_auto_clean = true).
 //! - **Cross‑platform**: Uses std::path::Path and PathBuf for portable path handling.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -84,14 +83,10 @@ impl DirFS {
             return Err(anyhow!("Access denied: {:?}", root));
         }
 
-        let inner_root = PathBuf::from("/");
-        let mut entries = BTreeMap::new();
-        entries.insert(inner_root.clone(), Entry::new(EntryType::Directory));
-
         Ok(Self {
             root,
-            cwd: inner_root,
-            entries,
+            cwd: PathBuf::from("/"),
+            entries: BTreeMap::new(),
             created_root_parents,
             is_auto_clean: true,
         })
@@ -313,7 +308,7 @@ impl FsBackend for DirFS {
     /// The `path` can be in relative or absolute form.
     fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         let inner = self.to_inner(path);
-        self.entries.contains_key(&inner)
+        utils::is_virtual_root(&inner) || self.entries.contains_key(&inner)
     }
 
     /// Checks if `path` is a directory.
@@ -323,7 +318,7 @@ impl FsBackend for DirFS {
         if !self.exists(&inner) {
             return Err(anyhow!("{} does not exist", path.display()));
         }
-        Ok(self.entries[&inner].is_dir())
+        Ok(utils::is_virtual_root(&inner) || self.entries[&inner].is_dir())
     }
 
     /// Checks if `path` is a regular file.
@@ -333,7 +328,7 @@ impl FsBackend for DirFS {
         if !self.exists(&inner) {
             return Err(anyhow!("{} does not exist", path.display()));
         }
-        Ok(self.entries[&inner].is_file())
+        Ok(!utils::is_virtual_root(&inner) && self.entries[&inner].is_file())
     }
 
     /// Returns an iterator over directory entries at a specific depth (shallow listing).
@@ -672,19 +667,16 @@ impl FsBackend for DirFS {
     fn cleanup(&mut self) -> bool {
         let mut is_ok = true;
 
-        // Collect all paths to delete (except the root "/")
-        let mut sorted_paths_to_remove: BTreeSet<PathBuf> = BTreeSet::new();
-        for (pb, _) in &self.entries {
-            if pb != "/" {
-                sorted_paths_to_remove.insert(pb.clone());
-            }
+        let mut sorted_paths_to_remove = Vec::new();
+        for (pb, _) in self.entries.iter().rev() {
+            sorted_paths_to_remove.push(pb.clone());
         }
 
-        for entry in sorted_paths_to_remove.iter().rev() {
-            if let Ok(host) = self.to_host(entry) {
+        for pb in &sorted_paths_to_remove {
+            if let Ok(host) = self.to_host(pb) {
                 let result = utils::rm_on_host(&host);
                 if result.is_ok() {
-                    self.entries.remove(entry);
+                    self.entries.remove(pb);
                 } else {
                     is_ok = false;
                     eprintln!("Unable to remove: {}", host.display());
@@ -737,7 +729,6 @@ mod tests {
 
             assert_eq!(fs.root, root);
             assert_eq!(fs.cwd, PathBuf::from("/"));
-            assert!(fs.entries.contains_key(&PathBuf::from("/")));
             assert!(fs.created_root_parents.is_empty());
             assert!(fs.is_auto_clean);
         }
@@ -3085,9 +3076,7 @@ mod tests {
                 assert!(parent.exists());
             }
 
-            // Only entries (except "/") were removed
-            assert_eq!(fs.entries.len(), 1);
-            assert!(fs.entries.contains_key(&PathBuf::from("/")));
+            assert_eq!(fs.entries.len(), 0);
         }
 
         #[test]
@@ -3096,14 +3085,11 @@ mod tests {
             let root = temp_dir.path();
 
             let mut fs = DirFS::new(root).unwrap();
-            // entries contains only "/"
-            assert_eq!(fs.entries.len(), 1);
+            assert_eq!(fs.entries.len(), 0);
 
             fs.cleanup();
 
-            assert_eq!(fs.entries.len(), 1); // "/" remained
-            assert!(fs.entries.contains_key(&PathBuf::from("/")));
-            assert!(root.exists()); // The root is not removed
+            assert_eq!(fs.entries.len(), 0);
         }
     }
 
