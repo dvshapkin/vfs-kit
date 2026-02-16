@@ -16,7 +16,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vfs-kit = "0.1"
+vfs-kit = "0.2"
 ```
 
 Or via `cargo add`:
@@ -26,7 +26,7 @@ cargo add vfs-kit
 ```
 
 ## What's new in last version?
-### [0.1.14]
+### [0.2.0]
 ### Added
 - `MapFS` implementation
 - new method `FsBackend::to_host()`
@@ -36,6 +36,7 @@ cargo add vfs-kit
 + `ls()` and `tree()` - the item type in the iterator is now `&Path`
 ### Fixed
 - `cd()` - returns error now if target path is a file
+- Fixed known bugs
 - Inaccuracies in the documentation have been corrected
 
 
