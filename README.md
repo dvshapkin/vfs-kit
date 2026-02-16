@@ -16,7 +16,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vfs-kit = "0.1"
+vfs-kit = "0.2"
 ```
 
 Or via `cargo add`:
@@ -26,18 +26,25 @@ cargo add vfs-kit
 ```
 
 ## What's new in last version?
-### [0.1.13]
+### [0.2.0]
+### Added
+- `MapFS` implementation
+- new method `FsBackend::to_host()`
+- new method `FsBackend::is_dir()`
+- new method `FsBackend::is_file()`
 ### Changed
-- This version is entirely dedicated to improving the documentation. I've decided to abandon the neural 
-  network-generated text in favor of less formal, yet more informative and useful, documentation written by myself.
-- Also, the changes affected three functions:
-  + `mkfile()` - if the parent directory not exists, it will be created.
-  + `ls()` and `tree()` - they no longer work with an implicit path parameter.
++ `ls()` and `tree()` - the item type in the iterator is now `&Path`
+### Fixed
+- `cd()` - returns error now if target path is a file
+- Fixed known bugs
+- Inaccuracies in the documentation have been corrected
+
 
 ## Overview
 
 `vfs-kit` allows you to work with filesystem-like structures in Rust without touching the actual disk (unless you want to). 
-It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS`, which map to actual directories.
+It defines the generic `FsBackend` trait and provides specific implementations, such as `DirFS` (which maps to real directories)
+and `MapFS`.
 
 **Key ideas**:
 - **Abstraction**: Work with different types of storage (real directories, memory cards, etc.) through a single API.
@@ -156,14 +163,44 @@ fs.forget("/file.02")                        // remove the file from VFS control
 + Iterate over directory contents with `ls()` and recursively with `tree()`
 + Clean the VFS with `cleanup()`
 
+## What's different about `MapFS`?
+`MapFS` doesn't work with the host filesystem at all (unlike `DirFS`). Instead of actual files and directories, 
+pseudo-files and pseudo-directories are created, but the same API defined in `FsBackend` applies to them.
+This means you can create directories and files, write contents to them, read from files, and so on. Since all 
+the artifacts you create will be stored in RAM, `MapFS` isn't suitable for creating too many of them. 
+This can slow down your application and the system as a whole. If you need a large number of files and/or directories, 
+it's better to use `DirFS`.
+
+### Optimal use scenarios
++ temporary data storage within a single process;
++ unit testing of file operations (without affecting the real FS);
++ caching small amounts of data with fast access;
++ prototyping file interactions;
++ working with configurations/templates in memory.
+
+### Comparison with `DirFS`
++ `MapFS`:
+  - speed of operations (memory vs disk);
+  - isolation (does not affect the host FS);
+  - limited by RAM capacity;
+  - data is lost when the process terminates (serialization is planned to be implemented).
++ `DirFS`:
+  - data persistence;
+  - support for large volumes;
+  - slower (I/O to disk);
+  - risk of side effects on the host FS.
+
 ## API Summary
 
 ### Core Trait
 * `FsBackend`: Defines the VFS interface:
   + `root()` — get the root path
   + `cwd()` — get current working directory
+  + `to_host()` — returns the path on the host system that matches the specified internal path
   + `cd(path)` — change directory
   + `exists(path)` — check if path exists
+  + `is_dir(path)` — check if path is a directory
+  + `is_file(path)` — check if path is a regular file
   + `ls(path)` — returns an iterator over directory entries
   + `tree(path)` — returns a recursive iterator over the directory tree starting from a given path
   + `mkdir(path)` — creates directory
@@ -185,13 +222,6 @@ fs.forget("/file.02")                        // remove the file from VFS control
 ## Planned Features
 
 We’re working on these backends:
-* `MapFS`
-  + In‑memory filesystem using Map.
-  + Ideal for testing and transient data.
-  + No disk I/O; fully deterministic.
-  + Great for mocking file content in tests.
-
-
 * `LogFS`
   + Append‑only log‑structured filesystem.
   + Persists operations as a sequence of atomic log entries.
